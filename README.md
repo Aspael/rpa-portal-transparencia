@@ -1,6 +1,6 @@
 # RPA — Portal da Transparência
 
-Solução do [desafio full stack Python — desafio 01](https://github.com/mostqi/desafios-fullstack-python/tree/main/desafio-01). O projeto automatiza o próprio [Portal da Transparência](https://portaldatransparencia.gov.br/) com Python e Playwright, expõe o robô por uma API FastAPI e implementa o bônus com n8n, Google Drive e Google Sheets.
+Solução do [desafio full stack Python — desafio 01](https://github.com/mostqi/desafios-fullstack-python/tree/main/desafio-01). O projeto automatiza o próprio [Portal da Transparência](https://portaldatransparencia.gov.br/) com Python e Playwright, expõe o robô por uma API FastAPI e implementa o bônus com n8n, Google Drive e Google Sheets. Como incremento, o robô também é exposto por um servidor MCP e pode ser usado por um modelo local rodando no Ollama.
 
 ## Entrega
 
@@ -11,6 +11,8 @@ Solução do [desafio full stack Python — desafio 01](https://github.com/mostq
 | Coleta | Panorama da pessoa e detalhes de Auxílio Brasil, Auxílio Emergencial e Bolsa Família |
 | Evidência | Screenshot PNG codificado em Base64 dentro do JSON |
 | API | FastAPI, OpenAPI/Swagger, autenticação por `X-API-Key` e HTTPS |
+| MCP | Servidor MCP em `/mcp` (Streamable HTTP) com a tool `consultar_pessoa`, no mesmo processo da API |
+| Modelo local | Ollama como LLM local, conectado ao robô pelo MCP |
 | Hiperautomação | n8n com nós oficiais Google Drive e Google Sheets |
 | Implantação | Docker em VPS, disponível por HTTPS em domínio neutro |
 | Testes | 36 testes automatizados e validação estrutural do workflow n8n |
@@ -22,29 +24,34 @@ Links da aplicação:
 - OpenAPI: [https://python-rpa-9f3d.72-60-12-215.sslip.io/openapi.json](https://python-rpa-9f3d.72-60-12-215.sslip.io/openapi.json)
 - Health check: [https://python-rpa-9f3d.72-60-12-215.sslip.io/health](https://python-rpa-9f3d.72-60-12-215.sslip.io/health)
 
-Os endpoints de consulta exigem uma chave no cabeçalho `X-API-Key`. A chave de avaliação é compartilhada separadamente e não fica no repositório.
+Os endpoints de consulta exigem uma chave no cabeçalho `X-API-Key`. A chave de avaliação é compartilhada separadamente e não fica no repositório. O endpoint `/mcp` usa a mesma chave.
 
 ## Fluxo da solução
 
 ```mermaid
 flowchart LR
     A[Entrada: nome, CPF ou NIS] --> B[API FastAPI]
+    O[Ollama: modelo local] <--> H[Cliente MCP]
+    H --> N[Servidor MCP /mcp]
+    N --> B
     B --> C[Playwright headless]
     C --> D[Portal da Transparência]
     D --> E[Panorama + benefícios + screenshot]
     E --> F[JSON estruturado]
     F --> G[n8n]
-    G --> H[Google Drive: arquivo JSON]
-    H --> I[Google Sheets: registro e link]
+    G --> H2[Google Drive: arquivo JSON]
+    H2 --> I[Google Sheets: registro e link]
 ```
 
 O robô abre a página inicial do portal, navega até a busca de pessoas, informa o termo e o filtro social, escolhe o primeiro resultado e coleta o panorama. Em seguida, abre os detalhes dos benefícios previstos no enunciado, percorre a paginação e devolve um único documento JSON.
 
 Cada consulta cria um contexto de navegador separado. Um semáforo limita a quantidade de navegadores simultâneos sem compartilhar cookies, páginas ou dados entre execuções.
 
+O servidor MCP roda no mesmo processo da API e chama o mesmo robô, então o semáforo vale também para consultas feitas pelo MCP. O Ollama não fala MCP sozinho: o modelo decide quando chamar a ferramenta (tool calling) e um cliente MCP, que pode ser o script `scripts/chat_ollama.py` ou um agente do n8n, executa a chamada ao `/mcp` e devolve o resultado ao modelo.
+
 ## Executar localmente
 
-Requisitos: Python 3.11 ou superior e Node.js apenas para validar o workflow n8n.
+Requisitos: Python 3.11 ou superior e Node.js apenas para validar o workflow n8n. O [Ollama](https://ollama.com/) é necessário só para usar o modelo local.
 
 ```bash
 python3 -m venv .venv
@@ -89,6 +96,52 @@ curl -X POST http://127.0.0.1:8000/consultas \
 ```
 
 `GET /health` verifica o processo da API. A disponibilidade do Portal da Transparência é avaliada durante cada consulta.
+
+### MCP
+
+Com a API rodando, o servidor MCP fica disponível em `http://127.0.0.1:8000/mcp` (Streamable HTTP, sem estado), com o cabeçalho `X-API-Key`. Ele expõe uma tool:
+
+| Tool | Parâmetros | Descrição |
+|---|---|---|
+| `consultar_pessoa` | `termo`, `beneficiario_programa_social` (padrão `false`), `incluir_evidencia` (padrão `false`) | Consulta a pessoa e devolve o mesmo JSON do [contrato do resultado](#contrato-do-resultado) |
+
+Por padrão a tool devolve `evidencia` como `null`, porque o screenshot Base64 ocupa muito espaço no contexto de um modelo local. Use `incluir_evidencia=true` quando precisar da imagem. `status`, `codigo` e `mensagem` são preservados.
+
+Para testar, conecte o MCP Inspector ao endpoint:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+Para conectar o Claude Code:
+
+```bash
+claude mcp add --transport http portal-transparencia \
+  http://127.0.0.1:8000/mcp \
+  --header "X-API-Key: SUA_CHAVE"
+```
+
+### Modelo local com Ollama
+
+```bash
+ollama serve
+ollama pull qwen2.5:7b
+```
+
+Use um modelo com suporte a tool calling, como `qwen2.5`, `llama3.1` ou `mistral-nemo`. Depois, com a API rodando, abra o chat no terminal:
+
+```bash
+export MCP_URL=http://127.0.0.1:8000/mcp
+export MCP_API_KEY=SUA_CHAVE
+export OLLAMA_MODEL=qwen2.5:7b
+python scripts/chat_ollama.py
+```
+
+O script lista as tools do servidor MCP, entrega ao modelo, executa as chamadas pedidas e devolve o resultado até haver a resposta final.
+
+No n8n, o mesmo resultado sai de um nó **AI Agent** com **Ollama Chat Model** (URL base do Ollama; em Docker, `http://host.docker.internal:11434`) e **MCP Client Tool** apontando para `/mcp` com o cabeçalho `X-API-Key`.
+
+Uma consulta pode levar até `QUERY_TIMEOUT_SECONDS`, e a resposta do modelo local soma tempo a isso. Os dados consultados ficam na sua máquina ou rede quando o cliente e o Ollama também são locais; mantenha `REQUIRE_API_KEY=true`.
 
 ### Docker
 
@@ -154,6 +207,8 @@ A suíte cobre entrada e autenticação, busca por nome/documento, filtro social
 
 O script Node valida conexões, scripts, geração do arquivo JSON, presença dos nós oficiais Drive/Sheets, mapeamento das sete colunas e ausência de credenciais no artefato versionado.
 
+Os testes do MCP (`tests/test_mcp.py`) verificam que a tool `consultar_pessoa` é listada, que a chamada sem `X-API-Key` é rejeitada, que a evidência só é devolvida quando solicitada e que o `status` é preservado. O robô é simulado, sem acessar o portal e sem depender do Ollama.
+
 ## Configuração
 
 | Variável | Padrão | Função |
@@ -166,6 +221,11 @@ O script Node valida conexões, scripts, geração do arquivo JSON, presença do
 | `MAX_DETAIL_PAGES` | `100` | limite de páginas por benefício |
 | `API_KEY` | vazia | valor aceito no cabeçalho `X-API-Key` |
 | `REQUIRE_API_KEY` | `false` | impede iniciar sem chave quando ativado |
+| `MCP_ENABLED` | `true` | habilita o endpoint `/mcp` |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | endereço do Ollama, usado por `scripts/chat_ollama.py` |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | modelo local, usado por `scripts/chat_ollama.py` |
+| `MCP_URL` | `http://127.0.0.1:8000/mcp` | endereço do servidor MCP, usado por `scripts/chat_ollama.py` |
+| `MCP_API_KEY` | vazia | chave enviada em `X-API-Key` ao `/mcp`, usada por `scripts/chat_ollama.py` |
 
 A implantação pública usa `REQUIRE_API_KEY=true`, HTTPS e um único worker. A concorrência continua configurável por `MAX_CONCURRENT` de acordo com a memória disponível.
 
@@ -173,14 +233,15 @@ A implantação pública usa `REQUIRE_API_KEY=true`, HTTPS e um único worker. A
 
 ```text
 app/
-  api.py              API e OpenAPI
+  api.py              API e OpenAPI (monta o MCP em /mcp)
+  mcp_server.py       servidor MCP e tool consultar_pessoa
   robot.py            ciclo do navegador e navegação
   extraction.py       leitura do panorama, tabelas e benefícios
   models.py           contrato do resultado
   cli.py              execução em linha de comando
 tests/                testes unitários e de integração com Chromium
 workflows/            workflow n8n importável
-scripts/              diagnósticos e validação do workflow
+scripts/              diagnósticos, validação do workflow e chat_ollama.py
 docs/                 arquitetura do bônus, implantação e relatório técnico
 ```
 
