@@ -1,19 +1,72 @@
+# Execução local. Os valores vêm do arquivo .env (se existir) ou dos padrões abaixo.
 services:
   api:
     build: .
+    restart: unless-stopped
+    init: true
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${HOST_PORT:-8000}:8000"
     environment:
       HEADLESS: "true"
-      MAX_CONCURRENT: "3"
+      MAX_CONCURRENT: "${MAX_CONCURRENT:-3}"
+      QUERY_TIMEOUT_SECONDS: "${QUERY_TIMEOUT_SECONDS:-120}"
+      NAVIGATION_TIMEOUT_MS: "${NAVIGATION_TIMEOUT_MS:-30000}"
+      MAX_DETAIL_PAGES: "${MAX_DETAIL_PAGES:-100}"
       API_KEY: "${API_KEY:-}"
+      REQUIRE_API_KEY: "${REQUIRE_API_KEY:-false}"
       GOOGLE_TOKEN_JSON: "${GOOGLE_TOKEN_JSON:-}"
       GOOGLE_DRIVE_FOLDER_ID: "${GOOGLE_DRIVE_FOLDER_ID:-}"
       GOOGLE_SPREADSHEET_ID: "${GOOGLE_SPREADSHEET_ID:-}"
+      EXPORT_STATE_DIR: /app/outputs/export-state
     volumes:
       - export-state:/app/outputs
     shm_size: 1gb
-    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # n8n em contêiner: não precisa instalar nada no computador.
+  # Acesse http://localhost:5678 e importe o workflow uma vez (ver README).
+  n8n:
+    image: "n8nio/n8n:${N8N_VERSION:-stable}"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${N8N_HOST_PORT:-5678}:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: "${N8N_WEBHOOK_URL:-http://localhost:5678/}"
+      # Cookie seguro exige HTTPS; localmente o acesso é por http.
+      N8N_SECURE_COOKIE: "false"
+      N8N_ENCRYPTION_KEY: "${N8N_ENCRYPTION_KEY:-}"
+      GENERIC_TIMEZONE: "${TZ:-America/Manaus}"
+      TZ: "${TZ:-America/Manaus}"
+      N8N_RUNNERS_ENABLED: "true"
+      # O nó "Entrada" lê a URL da API por $env.RPA_API_URL.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      RPA_API_URL: http://api:8000
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   export-state:
+  n8n-data:
+
+# Rede bridge com nome fixo: outros contêineres (n8n, Ollama...) podem entrar
+# nela como external e acessar a API em http://api:8000.
+networks:
+  default:
+    name: "${DOCKER_NETWORK:-rpa-network}"
+    driver: bridge

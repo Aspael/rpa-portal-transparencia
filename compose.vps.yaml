@@ -33,3 +33,7 @@ services:
         max-file: "3"
 volumes:
   export-state:
+networks:
+  default:
+    name: "${DOCKER_NETWORK:-rpa-network}"
+    driver: bridge
