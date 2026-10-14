@@ -1,6 +1,6 @@
 # RPA — Portal da Transparência
 
-Solução do [desafio full stack Python — desafio 01](https://github.com/mostqi/desafios-fullstack-python/tree/main/desafio-01). O projeto automatiza o próprio [Portal da Transparência](https://portaldatransparencia.gov.br/) com Python e Playwright, expõe o robô por uma API FastAPI e implementa o bônus com n8n, Google Drive e Google Sheets. Como incremento, o robô também é exposto por um servidor MCP e pode ser usado por um modelo local rodando no Ollama.
+
 
 ## Entrega
 
