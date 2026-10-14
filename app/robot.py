@@ -1,6 +1,8 @@
 import asyncio
 import base64
+import os
 import re
+import sys
 from time import monotonic
 from contextlib import suppress
 
@@ -15,6 +17,13 @@ from app.models import Benefit, Diagnostic, Evidence, Person, Query, Result
 
 TIMEOUT_MESSAGE = "Não foi possível retornar os dados no tempo de resposta solicitado"
 PERSON_PATH = re.compile(r"/(?:busca/)?pessoa-fisica/\d+(?:-[^/?#]+)?(?:[/?#]|$)")
+
+
+def _has_display() -> bool:
+    """Linux sem servidor gráfico (Docker, VPS) só consegue rodar headless."""
+    if not sys.platform.startswith("linux"):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
 class PortalError(Exception):
@@ -33,7 +42,11 @@ class Robot:
     async def start(self):
         self._playwright = await async_playwright().start()
         try:
-            self._browser = await self._playwright.chromium.launch(headless=self.settings.headless)
+            self._browser = await self._playwright.chromium.launch(
+                headless=self.settings.headless or not _has_display(),
+                # Em contêiner, /dev/shm costuma ser pequeno e não há GPU.
+                args=["--disable-dev-shm-usage", "--disable-gpu"],
+            )
         except BaseException:
             await self._playwright.stop()
             raise

@@ -1,0 +1,9 @@
+# Dependências de execução. Mantenha em sincronia com pyproject.toml.
+fastapi==0.141.1
+uvicorn==0.54.0
+playwright==1.63.0
+pydantic-settings==2.15.0
+httpx==0.28.1
+filelock==4.0.3
+google-api-python-client==2.200.0
+google-auth-oauthlib==1.4.1

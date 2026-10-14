@@ -63,6 +63,10 @@ cp .env.example .env
 uvicorn app.api:app --host 127.0.0.1 --port 8000
 ```
 
+Para instalar só as dependências de execução, sem o pacote em modo editável, use `pip install -r requirements.txt`.
+
+No Windows (PowerShell), ative o ambiente com `.\.venv\Scripts\Activate.ps1`, defina a variável com `$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.browsers"` e copie o arquivo com `Copy-Item .env.example .env`.
+
 No Linux, instale também as dependências do Chromium:
 
 ```bash
@@ -150,6 +154,21 @@ docker compose up --build
 ```
 
 A imagem inclui Python, Chromium e as dependências de sistema do Playwright.
+
+O mesmo `compose.yaml` sobe dois contêineres na rede `rpa-network`:
+
+| Serviço | Endereço no computador | Endereço dentro da rede |
+|---|---|---|
+| `api` | `http://127.0.0.1:8000` | `http://api:8000` |
+| `n8n` | `http://localhost:5678` | `http://n8n:5678` |
+
+O n8n não precisa ser instalado no computador. Na primeira vez, importe o workflow dentro do contêiner:
+
+```bash
+docker compose exec n8n n8n import:workflow --input=/workflows/n8n-consulta-google.json
+```
+
+O nó **Entrada** usa `RPA_API_URL` (`http://api:8000` no compose) e, sem essa variável, a API pública. Dados e credenciais do n8n ficam no volume `n8n-data`. No Google Cloud, cadastre a URL de retorno OAuth `http://localhost:5678/rest/oauth2-credential/callback`.
 
 ## Contrato do resultado
 
