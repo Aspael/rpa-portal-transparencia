@@ -47,7 +47,10 @@ services:
       N8N_RUNNERS_ENABLED: "true"
       # O nó "Entrada" lê a URL da API por $env.RPA_API_URL.
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
-      RPA_API_URL: http://api:8000
+      # run.py --local troca para http://host.docker.internal:8000.
+      RPA_API_URL: "${RPA_API_URL:-http://api:8000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - n8n-data:/home/node/.n8n
       - ./workflows:/workflows:ro

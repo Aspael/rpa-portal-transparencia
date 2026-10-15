@@ -147,6 +147,38 @@ No n8n, o mesmo resultado sai de um nó **AI Agent** com **Ollama Chat Model** (
 
 Uma consulta pode levar até `QUERY_TIMEOUT_SECONDS`, e a resposta do modelo local soma tempo a isso. Os dados consultados ficam na sua máquina ou rede quando o cliente e o Ollama também são locais; mantenha `REQUIRE_API_KEY=true`.
 
+### Tudo com um comando
+
+Requisitos: [Git](https://git-scm.com/), Python 3.11 ou superior e [Docker Desktop](https://www.docker.com/products/docker-desktop/) aberto.
+
+```bash
+git clone https://github.com/GeorgeLucas1/rpa-portal-transparencia.git
+cd rpa-portal-transparencia
+python run.py
+```
+
+Não é preciso criar `.venv` nem instalar dependências: o `run.py` usa só a biblioteca padrão do Python e a API roda dentro do contêiner. Ele:
+
+1. cria o `.env` a partir do `.env.example`, se ainda não existir;
+2. constrói a imagem e sobe a API e o n8n (`docker compose up -d --build`);
+3. espera a API (`/health`) e o n8n (`/healthz`) responderem;
+4. importa o workflow no n8n na primeira execução;
+5. abre `http://127.0.0.1:8000` no navegador e mostra os logs.
+
+`Ctrl+C` para os contêineres. A primeira execução demora mais porque baixa o Chromium; nas seguintes, use `python run.py --no-build`.
+
+| Comando | O que faz |
+|---|---|
+| `python run.py` | API e n8n em contêineres |
+| `python run.py --no-build` | Sobe sem reconstruir a imagem |
+| `python run.py --no-browser` | Não abre o navegador |
+| `python run.py --local` | API no Python local, só o n8n em contêiner |
+| `python run.py down` | Remove os contêineres (os volumes são mantidos) |
+
+O modo `--local` serve para desenvolver sem reconstruir a imagem a cada alteração. Ele exige o ambiente da seção [Executar localmente](#executar-localmente) com o `.venv` ativo, instala o Chromium em `.browsers` se faltar e aponta o n8n para `http://host.docker.internal:8000`. Se o n8n não alcançar a API, use `python run.py --local --host 0.0.0.0` com `REQUIRE_API_KEY=true`, porque assim a API fica visível na rede local.
+
+No Windows, se `python` não for reconhecido, use `py run.py`.
+
 ### Docker
 
 ```bash
@@ -210,6 +242,51 @@ O arquivo [workflows/n8n-consulta-google.json](workflows/n8n-consulta-google.jso
 8. devolve um recibo com os links do arquivo e da planilha.
 
 O primeiro gatilho é executado uma vez após a importação. Depois de ativado, o workflow executa automaticamente a cada `POST` recebido no webhook. Nenhum ID de pasta ou planilha é versionado. O nome do arquivo segue o padrão `CONSULTA_ID_DATA_HORA.json`. As credenciais OAuth ficam no cofre de credenciais do n8n e não são exportadas no workflow. O arquivo do Drive permanece privado na conta Google; o fluxo não cria compartilhamento público.
+
+### Configurar e ativar o workflow no n8n
+
+O n8n não lê a pasta `workflows/` sozinho. O `python run.py` importa o fluxo na primeira execução; sem ele, importe manualmente:
+
+```bash
+docker compose exec n8n n8n import:workflow --input=/workflows/n8n-consulta-google.json
+```
+
+O fluxo chega **desativado** e **sem credenciais**, de propósito: o JSON é público no Git e o n8n não ativa um fluxo cujos nós não têm credenciais. A configuração abaixo é feita uma vez e fica salva no volume `n8n-data`.
+
+**1. Definir a chave da API.** No `.env`, preencha `API_KEY` com um valor próprio e `REQUIRE_API_KEY=true`. Depois reinicie com `python run.py --no-build`.
+
+**2. Criar o cliente OAuth no Google Cloud.**
+
+1. Em [console.cloud.google.com](https://console.cloud.google.com), crie um projeto.
+2. Em **APIs e serviços → Biblioteca**, ative a **Google Drive API** e a **Google Sheets API**.
+3. Em **Tela de consentimento OAuth**, escolha **Externo** e adicione o seu e-mail Google como **usuário de teste**.
+4. Em **Credenciais → Criar credenciais → ID do cliente OAuth**, escolha **Aplicativo da Web** e cadastre o URI de redirecionamento `http://localhost:5678/rest/oauth2-credential/callback`.
+5. Copie o **Client ID** e o **Client Secret**.
+
+**3. Criar as credenciais no n8n** (`http://localhost:5678` → **Credentials**):
+
+| Credencial | Preenchimento |
+|---|---|
+| Google Drive OAuth2 API | Client ID e Client Secret; clique em **Sign in with Google** e entre na sua conta |
+| Google Sheets OAuth2 API | Mesmo Client ID e Secret; entre na mesma conta |
+| Header Auth | Nome `X-API-Key`; valor igual ao `API_KEY` do `.env` |
+
+Abra o workflow e selecione a credencial correspondente em cada nó: Google Drive, Google Sheets, **Consultar RPA** e o webhook **2. Receber consulta**.
+
+**4. Preparar o armazenamento.** Execute uma vez o gatilho **1. Configurar armazenamento**. Ele cria a pasta e a planilha no seu Google Drive.
+
+**5. Ativar.** Ligue a chave **Active** no topo do workflow (em versões novas do n8n, **Publish**). A partir daí, cada `POST` no webhook dispara uma consulta:
+
+```bash
+curl -X POST http://localhost:5678/webhook/consulta-portal-transparencia \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: SUA_CHAVE' \
+  -d '{"termo":"NOME, CPF OU NIS","beneficiario_programa_social":false}'
+```
+
+Não altere `"active"` para `true` no JSON: o fluxo seria importado ativo e sem credenciais, e o webhook falharia em todas as chamadas.
+
+Editar o JSON da pasta não atualiza o fluxo que já está no n8n. Como o arquivo não tem id fixo, importar de novo cria uma cópia. `python run.py down` preserva o volume `n8n-data`, mas `docker compose down -v` apaga o fluxo e as credenciais.
 
 Detalhes da integração estão em [docs/bonus-google.md](docs/bonus-google.md).
 
