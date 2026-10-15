@@ -1,0 +1,82 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [main, developer]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: transparencia-rpa:ci
+      API_KEY: ci-chave-de-teste
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar arquivos compose
+        run: |
+          docker compose -f compose.yaml config -q
+          API_KEY=x docker compose -f compose.vps.yaml config -q
+          API_KEY=x docker compose -f compose.easypanel.yaml config -q
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Cache das camadas no GitHub: o Chromium só é baixado de novo
+      # quando requirements.txt muda.
+      - name: Construir a imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Subir o contêiner
+        run: |
+          docker run -d --name api -p 8000:8000 --shm-size=1g \
+            -e API_KEY="$API_KEY" -e REQUIRE_API_KEY=true "$IMAGE"
+
+      - name: Aguardar /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then echo; exit 0; fi
+            sleep 2
+          done
+          echo "A API não respondeu em 60 s."
+          exit 1
+
+      - name: Testar a API
+        run: |
+          # expect STATUS curl-args...: falha se o código HTTP for diferente.
+          expect() {
+            want=$1; shift
+            got=$(curl -s -o /dev/null -w '%{http_code}' "$@")
+            echo "$got (esperado $want): ${*: -1}"
+            [ "$got" = "$want" ]
+          }
+          body='{"termo":"TESTE","beneficiario_programa_social":false}'
+          url=http://127.0.0.1:8000
+          expect 200 "$url/docs"
+          expect 200 "$url/openapi.json"
+          # Sem chave válida, a consulta é recusada antes de abrir o navegador.
+          expect 401 -X POST -H 'Content-Type: application/json' -d "$body" "$url/consultas"
+          expect 401 -X POST -H 'Content-Type: application/json' -H 'X-API-Key: errada' -d "$body" "$url/consultas"
+
+      - name: Verificar o Chromium dentro da imagem
+        run: |
+          docker exec api python -c "
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              b = p.chromium.launch()
+              print('Chromium', b.version)
+              b.close()
+          "
+
+      - name: Logs do contêiner
+        if: always()
+        run: docker logs api || true
