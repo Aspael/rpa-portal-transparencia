@@ -1,6 +1,20 @@
 # RPA — Portal da Transparência
 
-
+> **Antes de começar: as duas chaves do `.env`**
+>
+> | Variável | O que é | Formato | Onde colocar |
+> |---|---|---|---|
+> | `API_KEY` | senha que **você inventa** para proteger a sua API (`localhost:8000`). Não resolve o CAPTCHA. | texto aleatório sem espaços, aspas ou `#`. Gere com `openssl rand -hex 32` | no `.env` e no campo "Chave de acesso da API" do front (header `X-API-Key`) |
+> | `PORTAL_API_KEY` | chave **do governo** (cadastro gov.br, chega por e-mail). Faz consultas por CPF/NIS sem CAPTCHA. | exatamente como veio no e-mail, sem aspas | **só** no `.env`, nunca no campo do front |
+>
+> ```dotenv
+> API_KEY=valor_gerado_por_voce
+> REQUIRE_API_KEY=true
+> PORTAL_API_KEY=chave_recebida_por_email
+> PORTAL_API_MAX_RPM=80
+> ```
+>
+> Depois de editar o `.env`, reinicie a API (`docker compose up -d`). Passo a passo, testes e erros comuns: [Chaves de acesso](#chaves-de-acesso).
 
 ## Entrega
 
