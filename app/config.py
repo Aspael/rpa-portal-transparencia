@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     google_token_file: Path = Path("secrets/google-token.json")
     google_token_json: SecretStr | None = None
     require_api_key: bool = False
+    # API de Dados oficial: com chave, consultas por CPF/NIS não usam o site.
+    portal_api_key: SecretStr | None = None
+    portal_api_url: str = "https://api.portaldatransparencia.gov.br/api-de-dados"
+    portal_api_max_rpm: int = Field(default=80, ge=1, le=300)
     google_drive_folder_id: str = ""
     google_spreadsheet_id: str = ""
     google_sheet_tab: str = "Consultas"

@@ -12,6 +12,8 @@ services:
       REQUIRE_API_KEY: "true"
       API_KEY: "${API_KEY:?Defina API_KEY no arquivo de ambiente da VPS}"
       MAX_CONCURRENT: "${MAX_CONCURRENT:-2}"
+      PORTAL_API_KEY: "${PORTAL_API_KEY:-}"
+      PORTAL_API_MAX_RPM: "${PORTAL_API_MAX_RPM:-80}"
       QUERY_TIMEOUT_SECONDS: "120"
       GOOGLE_TOKEN_JSON: "${GOOGLE_TOKEN_JSON:-}"
       GOOGLE_DRIVE_FOLDER_ID: "${GOOGLE_DRIVE_FOLDER_ID:-}"

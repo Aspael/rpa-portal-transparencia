@@ -1,6 +1,20 @@
 # RPA — Portal da Transparência
 
-
+> **Antes de começar: as duas chaves do `.env`**
+>
+> | Variável | O que é | Formato | Onde colocar |
+> |---|---|---|---|
+> | `API_KEY` | senha que **você inventa** para proteger a sua API (`localhost:8000`). Não resolve o CAPTCHA. | texto aleatório sem espaços, aspas ou `#`. Gere com `openssl rand -hex 32` | no `.env` e no campo "Chave de acesso da API" do front (header `X-API-Key`) |
+> | `PORTAL_API_KEY` | chave **do governo** (cadastro gov.br, chega por e-mail). Faz consultas por CPF/NIS sem CAPTCHA. | exatamente como veio no e-mail, sem aspas | **só** no `.env`, nunca no campo do front |
+>
+> ```dotenv
+> API_KEY=valor_gerado_por_voce
+> REQUIRE_API_KEY=true
+> PORTAL_API_KEY=chave_recebida_por_email
+> PORTAL_API_MAX_RPM=80
+> ```
+>
+> Depois de editar o `.env`, reinicie a API (`docker compose up -d`). Passo a passo, testes e erros comuns: [Chaves de acesso](#chaves-de-acesso).
 
 ## Entrega
 
@@ -24,7 +38,7 @@ Links da aplicação:
 - OpenAPI: [https://python-rpa-9f3d.72-60-12-215.sslip.io/openapi.json](https://python-rpa-9f3d.72-60-12-215.sslip.io/openapi.json)
 - Health check: [https://python-rpa-9f3d.72-60-12-215.sslip.io/health](https://python-rpa-9f3d.72-60-12-215.sslip.io/health)
 
-Os endpoints de consulta exigem uma chave no cabeçalho `X-API-Key`. A chave de avaliação é compartilhada separadamente e não fica no repositório. O endpoint `/mcp` usa a mesma chave.
+Os endpoints de consulta exigem uma chave no cabeçalho `X-API-Key`. A chave de avaliação é compartilhada separadamente e não fica no repositório. O endpoint `/mcp` usa a mesma chave. Veja [Chaves de acesso](#chaves-de-acesso) para a diferença entre essa chave e a chave do governo.
 
 ## Fluxo da solução
 
@@ -202,6 +216,101 @@ docker compose exec n8n n8n import:workflow --input=/workflows/n8n-consulta-goog
 
 O nó **Entrada** usa `RPA_API_URL` (`http://api:8000` no compose) e, sem essa variável, a API pública. Dados e credenciais do n8n ficam no volume `n8n-data`. No Google Cloud, cadastre a URL de retorno OAuth `http://localhost:5678/rest/oauth2-credential/callback`.
 
+## Chaves de acesso
+
+O projeto usa **duas chaves diferentes**, e uma não substitui a outra:
+
+| Variável no `.env` | Para que serve | Quem cria | Onde é usada |
+|---|---|---|---|
+| `API_KEY` | proteger a **sua** API (`localhost:8000`) | você mesmo | header `X-API-Key`: campo "Chave de acesso da API" do front, n8n, `curl`, MCP |
+| `PORTAL_API_KEY` | consultar a API de Dados do **governo** por CPF/NIS, sem CAPTCHA | o Portal da Transparência, por e-mail | header `chave-api-dados`, enviado pelo próprio projeto |
+
+As duas ficam no arquivo `.env`, na mesma pasta do `compose.yaml`. Crie-o a partir do modelo com `cp .env.example .env` (no PowerShell, `Copy-Item .env.example .env`). O `.env` está no `.gitignore` e não deve ser versionado nem compartilhado.
+
+### `API_KEY`: a senha da sua API
+
+É uma senha que **você inventa**. Quando ela está definida, toda chamada a `/consultas`, `/integracoes/...` e `/mcp` precisa enviar o mesmo valor no header `X-API-Key`; sem ele, a resposta é **401**. Ela nunca é enviada ao Portal da Transparência e **não resolve o CAPTCHA**.
+
+**Quando preencher.** Rodando só em `127.0.0.1`, ela é opcional. É obrigatória quando a API fica acessível a outras máquinas: VPS, Easypanel, Render ou `--host 0.0.0.0`. Nesses casos, use também `REQUIRE_API_KEY=true`, para a API se recusar a iniciar sem chave.
+
+**Formato.** Texto livre, sem espaços, sem aspas e sem `#`. Recomenda-se um valor aleatório e longo, por exemplo 64 caracteres hexadecimais. Gere com um destes comandos:
+
+```bash
+openssl rand -hex 32
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+**Como configurar.** No `.env`:
+
+```dotenv
+API_KEY=cole_aqui_o_valor_gerado
+REQUIRE_API_KEY=true
+```
+
+Não use um valor copiado de exemplos ou da documentação: quem lê o repositório também o conhece.
+
+O `.env` só é lido quando a API inicia. Depois de editar, reinicie: `docker compose up -d` (Docker) ou `python run.py --no-build`.
+
+**Como usar.**
+
+- **Front** (`http://localhost:8000`): abra "Chave de acesso da API" e cole o mesmo valor do `API_KEY`. Ele vale só para aquela aba e não é salvo.
+- **curl**: `-H 'X-API-Key: SEU_VALOR'` (exemplo em [API](#api)).
+- **n8n**: credencial *Header Auth* com nome `X-API-Key` e o mesmo valor (ver [Configurar e ativar o workflow no n8n](#configurar-e-ativar-o-workflow-no-n8n)).
+
+| `API_KEY` | `REQUIRE_API_KEY` | Comportamento |
+|---|---|---|
+| vazia | `false` | aceita chamadas sem chave (só para uso local) |
+| preenchida | qualquer | exige `X-API-Key` igual ao valor; senão, 401 |
+| vazia | `true` | a API não inicia (`API_KEY é obrigatória neste ambiente`) |
+
+### `PORTAL_API_KEY`: a chave do governo
+
+É a chave da **API de Dados** oficial do Portal da Transparência. Com ela, consultas por **CPF ou NIS** não abrem o site e, por isso, não caem no CAPTCHA do AWS WAF (ver [Alternativa oficial: API de Dados](#alternativa-oficial-api-de-dados)). Busca por nome continua pelo site.
+
+**Como obter (gratuito).**
+
+1. Acesse [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados) e escolha a opção de cadastro.
+2. Entre com sua conta **gov.br** e confirme o e-mail.
+3. A chave chega por e-mail. Ela é pessoal: não a compartilhe nem crie várias para somar limites.
+
+**Formato.** Copie a chave **exatamente** como veio no e-mail, sem aspas, espaços ou quebra de linha:
+
+```dotenv
+PORTAL_API_KEY=cole_aqui_a_chave_recebida_por_email
+PORTAL_API_MAX_RPM=80
+```
+
+`PORTAL_API_MAX_RPM` é o teto de requisições por minuto do projeto, abaixo do limite oficial (90/min das 06:00 às 23:59; 300/min das 00:00 às 05:59). Reinicie a API depois de editar.
+
+**Não cole essa chave no campo do front.** Aquele campo é para a `API_KEY`; a chave do governo só funciona no `.env`.
+
+**Testar a chave** direto na API do governo, antes de usar no projeto:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "chave-api-dados: SUA_CHAVE_GOV" \
+  "https://api.portaldatransparencia.gov.br/api-de-dados/pessoa-fisica?cpf=SEU_CPF"
+```
+
+`200` indica chave válida; `401` ou `403`, chave errada ou ainda não ativada.
+
+**Conferir se foi aplicada.** Faça uma consulta por CPF no front ou em `/consultas`. O resultado deve trazer `"modo_execucao": "api_oficial"`; se vier `"autonomo"`, a chave não foi carregada. No Docker, confira sem exibir o valor:
+
+```bash
+docker compose exec api sh -c 'test -n "$PORTAL_API_KEY" && echo definida || echo vazia'
+```
+
+### Erros comuns
+
+| Sintoma | Causa provável | O que fazer |
+|---|---|---|
+| HTTP 401 `Chave de API inválida` | `X-API-Key` diferente do `API_KEY` | cole no front/n8n exatamente o valor do `.env` |
+| editei o `.env` e nada mudou | API não reiniciada, ou `.env` em outra pasta | reinicie; o `.env` deve estar ao lado do `compose.yaml` de onde você roda o `docker compose` (no WSL, a pasta do WSL, não a do Windows) |
+| CPF retorna `PORTAL_BLOQUEADO` (502) | `PORTAL_API_KEY` vazia ou não carregada | preencha, reinicie e confira `modo_execucao` |
+| `CHAVE_PORTAL_INVALIDA` (502) | o governo recusou a chave | teste-a com o `curl` acima; confira se foi copiada inteira |
+| `LIMITE_API_EXCEDIDO` (429) | limite por minuto da chave atingido | aguarde um minuto; reduza `PORTAL_API_MAX_RPM` e `MAX_CONCURRENT`; cargas grandes de madrugada |
+| nome retorna `PORTAL_BLOQUEADO` | busca por nome usa o site, que tem CAPTCHA | consulte por CPF/NIS |
+
 ## Contrato do resultado
 
 | Campo | Conteúdo |
@@ -225,6 +334,12 @@ HTTP 200 representa coleta completa ou parcial; o consumidor deve conferir `stat
 O Portal da Transparência pode apresentar uma verificação humana do AWS WAF conforme rede, IP e sessão. O enunciado exige automação headless, mas não exige resolver CAPTCHA.
 
 Quando a verificação aparece, o robô não tenta burlá-la. Ele encerra a consulta com `status=erro`, `codigo=PORTAL_BLOQUEADO` e uma captura de diagnóstico. Esse tratamento evita timeout silencioso e impede que dados incompletos sejam apresentados como uma coleta válida.
+
+### Alternativa oficial: API de Dados
+
+Com `PORTAL_API_KEY` preenchida (chave gratuita do cadastro gov.br em [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados)), as consultas por **CPF/NIS** usam a API de Dados oficial em vez do site, sem CAPTCHA. O resultado sai com `modo_execucao=api_oficial`: a pessoa vem de `/pessoa-fisica` e cada benefício indicado nela é paginado no endpoint do programa. Não há screenshot, porque não há navegador. Busca por **nome** continua pelo site, já que a API não a oferece.
+
+O projeto limita as chamadas a `PORTAL_API_MAX_RPM` por minuto. Quando a API responde HTTP 429, ele aguarda e repete duas vezes; se o limite persistir, devolve `codigo=LIMITE_API_EXCEDIDO` com HTTP 429. Uma chave recusada gera `CHAVE_PORTAL_INVALIDA`.
 
 Os seletores e a extração foram validados no layout real em sessão autorizada. A suíte automatizada usa Chromium real e páginas locais determinísticas, sem enviar CPFs ou nomes ao governo.
 
@@ -253,7 +368,7 @@ docker compose exec n8n n8n import:workflow --input=/workflows/n8n-consulta-goog
 
 O fluxo chega **desativado** e **sem credenciais**, de propósito: o JSON é público no Git e o n8n não ativa um fluxo cujos nós não têm credenciais. A configuração abaixo é feita uma vez e fica salva no volume `n8n-data`.
 
-**1. Definir a chave da API.** No `.env`, preencha `API_KEY` com um valor próprio e `REQUIRE_API_KEY=true`. Depois reinicie com `python run.py --no-build`.
+**1. Definir a chave da API.** No `.env`, preencha `API_KEY` com um valor próprio e `REQUIRE_API_KEY=true` (formato e como gerar em [Chaves de acesso](#chaves-de-acesso)). Depois reinicie com `python run.py --no-build`.
 
 **2. Criar o cliente OAuth no Google Cloud.**
 
@@ -317,6 +432,8 @@ Os testes do MCP (`tests/test_mcp.py`) verificam que a tool `consultar_pessoa` �
 | `MAX_DETAIL_PAGES` | `100` | limite de páginas por benefício |
 | `API_KEY` | vazia | valor aceito no cabeçalho `X-API-Key` |
 | `REQUIRE_API_KEY` | `false` | impede iniciar sem chave quando ativado |
+| `PORTAL_API_KEY` | vazia | chave gov.br da API de Dados; com ela, consultas por CPF/NIS usam a API oficial em vez do site |
+| `PORTAL_API_MAX_RPM` | `80` | teto de requisições por minuto à API de Dados (limite oficial: 90/min de dia, 300/min de madrugada) |
 | `MCP_ENABLED` | `true` | habilita o endpoint `/mcp` |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | endereço do Ollama, usado por `scripts/chat_ollama.py` |
 | `OLLAMA_MODEL` | `qwen2.5:7b` | modelo local, usado por `scripts/chat_ollama.py` |
