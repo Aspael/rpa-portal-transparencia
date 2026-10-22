@@ -62,7 +62,7 @@ class Diagnostic(BaseModel):
 
 
 class Result(BaseModel):
-    modo_execucao: Literal["autonomo", "assistido"] = "autonomo"
+    modo_execucao: Literal["autonomo", "assistido", "api_oficial"] = "autonomo"
     consulta_id: str = Field(default_factory=lambda: str(uuid4()))
     consultado_em: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: Literal["sucesso", "parcial", "erro"] = "erro"

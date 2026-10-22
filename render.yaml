@@ -17,6 +17,8 @@ services:
         value: "true"
       - key: MAX_CONCURRENT
         value: "1"
+      - key: PORTAL_API_KEY
+        sync: false
       - key: GOOGLE_TOKEN_JSON
         sync: false
       - key: GOOGLE_DRIVE_FOLDER_ID

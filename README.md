@@ -226,6 +226,12 @@ O Portal da Transparência pode apresentar uma verificação humana do AWS WAF c
 
 Quando a verificação aparece, o robô não tenta burlá-la. Ele encerra a consulta com `status=erro`, `codigo=PORTAL_BLOQUEADO` e uma captura de diagnóstico. Esse tratamento evita timeout silencioso e impede que dados incompletos sejam apresentados como uma coleta válida.
 
+### Alternativa oficial: API de Dados
+
+Com `PORTAL_API_KEY` preenchida (chave gratuita do cadastro gov.br em [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados)), as consultas por **CPF/NIS** usam a API de Dados oficial em vez do site, sem CAPTCHA. O resultado sai com `modo_execucao=api_oficial`: a pessoa vem de `/pessoa-fisica` e cada benefício indicado nela é paginado no endpoint do programa. Não há screenshot, porque não há navegador. Busca por **nome** continua pelo site, já que a API não a oferece.
+
+O projeto limita as chamadas a `PORTAL_API_MAX_RPM` por minuto. Quando a API responde HTTP 429, ele aguarda e repete duas vezes; se o limite persistir, devolve `codigo=LIMITE_API_EXCEDIDO` com HTTP 429. Uma chave recusada gera `CHAVE_PORTAL_INVALIDA`.
+
 Os seletores e a extração foram validados no layout real em sessão autorizada. A suíte automatizada usa Chromium real e páginas locais determinísticas, sem enviar CPFs ou nomes ao governo.
 
 ## Bônus: n8n, Drive e Sheets
@@ -317,6 +323,8 @@ Os testes do MCP (`tests/test_mcp.py`) verificam que a tool `consultar_pessoa` �
 | `MAX_DETAIL_PAGES` | `100` | limite de páginas por benefício |
 | `API_KEY` | vazia | valor aceito no cabeçalho `X-API-Key` |
 | `REQUIRE_API_KEY` | `false` | impede iniciar sem chave quando ativado |
+| `PORTAL_API_KEY` | vazia | chave gov.br da API de Dados; com ela, consultas por CPF/NIS usam a API oficial em vez do site |
+| `PORTAL_API_MAX_RPM` | `80` | teto de requisições por minuto à API de Dados (limite oficial: 90/min de dia, 300/min de madrugada) |
 | `MCP_ENABLED` | `true` | habilita o endpoint `/mcp` |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | endereço do Ollama, usado por `scripts/chat_ollama.py` |
 | `OLLAMA_MODEL` | `qwen2.5:7b` | modelo local, usado por `scripts/chat_ollama.py` |
