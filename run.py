@@ -102,7 +102,13 @@ def up(args, settings):
             [sys.executable, "-m", "uvicorn", "app.api:app", "--host", args.host, "--port", api_port],
             cwd=ROOT, env=env,
         )
-        compose("up", "-d", "--no-deps", "n8n", env=env)
+        # O histórico usa o Postgres do contêiner pela porta publicada em 127.0.0.1.
+        # DATABASE_URL do .env tem prioridade (o próprio Settings o lê).
+        if not settings.get("DATABASE_URL"):
+            env["DATABASE_URL"] = (f"postgresql://{settings.get('POSTGRES_USER', 'observa')}:"
+                                   f"{settings.get('POSTGRES_PASSWORD', 'observa')}@localhost:"
+                                   f"{settings.get('POSTGRES_HOST_PORT', '5432')}/{settings.get('POSTGRES_DB', 'observa')}")
+        compose("up", "-d", "--no-deps", "postgres", "n8n", env=env)
     else:
         compose("up", "-d", *([] if args.no_build else ["--build"]), env=env)
 

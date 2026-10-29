@@ -29,7 +29,8 @@
 | Modelo local | Ollama como LLM local, conectado ao robô pelo MCP |
 | Hiperautomação | n8n com nós oficiais Google Drive e Google Sheets |
 | Implantação | Docker em VPS, disponível por HTTPS em domínio neutro |
-| Testes | 36 testes automatizados e validação estrutural do workflow n8n |
+| Histórico | PostgreSQL com todas as consultas, listadas e reabertas pelo front |
+| Testes | 39 testes automatizados e validação estrutural do workflow n8n |
 
 Links da aplicação:
 
@@ -115,6 +116,21 @@ curl -X POST http://127.0.0.1:8000/consultas \
 
 `GET /health` verifica o processo da API. A disponibilidade do Portal da Transparência é avaliada durante cada consulta.
 
+### Histórico no PostgreSQL
+
+Com `DATABASE_URL` definido, cada resposta de `POST /consultas` (sucesso, parcial ou erro) é gravada na tabela `consultas`, criada automaticamente no primeiro uso. O JSON completo fica na coluna `resultado` (`jsonb`), e termo, nome, CPF, NIS, status e data ficam em colunas próprias para filtro. Se o banco cair, a consulta continua respondendo normalmente e a falha aparece só no log.
+
+| Rota | O que faz |
+|---|---|
+| `GET /consultas?limite=20&busca=maria` | Lista as consultas mais recentes (resumo), com filtro opcional por termo ou nome |
+| `GET /consultas/{consulta_id}` | Devolve o JSON completo de uma consulta gravada |
+
+As duas rotas usam o mesmo `X-API-Key` e respondem `503` com `HISTORICO_DESATIVADO` quando `DATABASE_URL` está vazio. No front, o cartão **03 · Consultas anteriores** lista o histórico; clicar em um item reabre o resultado, com evidência, download do JSON e exportação para o Google.
+
+```bash
+docker compose exec postgres psql -U observa -c "SELECT consultado_em, termo, nome, status FROM consultas ORDER BY consultado_em DESC LIMIT 10"
+```
+
 ### MCP
 
 Com a API rodando, o servidor MCP fica disponível em `http://127.0.0.1:8000/mcp` (Streamable HTTP, sem estado), com o cabeçalho `X-API-Key`. Ele expõe uma tool:
@@ -186,7 +202,7 @@ Não é preciso criar `.venv` nem instalar dependências: o `run.py` usa só a b
 | `python run.py` | API e n8n em contêineres |
 | `python run.py --no-build` | Sobe sem reconstruir a imagem |
 | `python run.py --no-browser` | Não abre o navegador |
-| `python run.py --local` | API no Python local, só o n8n em contêiner |
+| `python run.py --local` | API no Python local; n8n e PostgreSQL em contêiner |
 | `python run.py down` | Remove os contêineres (os volumes são mantidos) |
 
 O modo `--local` serve para desenvolver sem reconstruir a imagem a cada alteração. Ele exige o ambiente da seção [Executar localmente](#executar-localmente) com o `.venv` ativo, instala o Chromium em `.browsers` se faltar e aponta o n8n para `http://host.docker.internal:8000`. Se o n8n não alcançar a API, use `python run.py --local --host 0.0.0.0` com `REQUIRE_API_KEY=true`, porque assim a API fica visível na rede local.
@@ -201,12 +217,15 @@ docker compose up --build
 
 A imagem inclui Python, Chromium e as dependências de sistema do Playwright.
 
-O mesmo `compose.yaml` sobe dois contêineres na rede `rpa-network`:
+O mesmo `compose.yaml` sobe três contêineres na rede `rpa-network`:
 
 | Serviço | Endereço no computador | Endereço dentro da rede |
 |---|---|---|
 | `api` | `http://127.0.0.1:8000` | `http://api:8000` |
 | `n8n` | `http://localhost:5678` | `http://n8n:5678` |
+| `postgres` | `127.0.0.1:5432` | `postgres:5432` |
+
+O PostgreSQL guarda o [histórico das consultas](#histórico-no-postgresql) no volume `postgres-data`; usuário, senha e banco vêm de `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` (padrão `observa`).
 
 O n8n não precisa ser instalado no computador. Na primeira vez, importe o workflow dentro do contêiner:
 

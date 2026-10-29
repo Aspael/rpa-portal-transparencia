@@ -20,9 +20,39 @@ services:
       GOOGLE_DRIVE_FOLDER_ID: "${GOOGLE_DRIVE_FOLDER_ID:-}"
       GOOGLE_SPREADSHEET_ID: "${GOOGLE_SPREADSHEET_ID:-}"
       EXPORT_STATE_DIR: /app/outputs/export-state
+      # Histórico das consultas no serviço postgres abaixo.
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-observa}:${POSTGRES_PASSWORD:-observa}@postgres:5432/${POSTGRES_DB:-observa}"
     volumes:
       - export-state:/app/outputs
     shm_size: 1gb
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # PostgreSQL do histórico de consultas. A porta fica só em 127.0.0.1 para
+  # permitir o modo run.py --local e ferramentas como psql/DBeaver.
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-observa}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-observa}"
+      POSTGRES_DB: "${POSTGRES_DB:-observa}"
+      TZ: "${TZ:-America/Manaus}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     logging:
       driver: json-file
       options:
@@ -68,6 +98,7 @@ services:
 volumes:
   export-state:
   n8n-data:
+  postgres-data:
 
 # Rede bridge com nome fixo: outros contêineres (n8n, Ollama...) podem entrar
 # nela como external e acessar a API em http://api:8000.
