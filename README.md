@@ -1,72 +1,72 @@
-# RPA — Portal da Transparência
+**# RPA — Portal da Transparência
 
-> **Antes de começar: as duas chaves do `.env`**
+> **Before you start: the two keys in `.env`**
 >
-> | Variável | O que é | Formato | Onde colocar |
+> | Variable | What it is | Format | Where to put it |
 > |---|---|---|---|
-> | `API_KEY` | senha que **você inventa** para proteger a sua API (`localhost:8000`). Não resolve o CAPTCHA. | texto aleatório sem espaços, aspas ou `#`. Gere com `openssl rand -hex 32` | no `.env` e no campo "Chave de acesso da API" do front (header `X-API-Key`) |
-> | `PORTAL_API_KEY` | chave **do governo** (cadastro gov.br, chega por e-mail). Faz consultas por CPF/NIS sem CAPTCHA. | exatamente como veio no e-mail, sem aspas | **só** no `.env`, nunca no campo do front |
+> | `API_KEY` | a password that **you make up** to protect your own API (`localhost:8000`). It does not solve the CAPTCHA. | random text with no spaces, quotes or `#`. Generate it with `openssl rand -hex 32` | in `.env` and in the "API access key" field of the front end (`X-API-Key` header) |
+> | `PORTAL_API_KEY` | the **government's** key (gov.br registration, arrives by e-mail). Allows CPF/NIS queries without a CAPTCHA. | exactly as it came in the e-mail, no quotes | **only** in `.env`, never in the front-end field |
 >
 > ```dotenv
-> API_KEY=valor_gerado_por_voce
+> API_KEY=value_generated_by_you
 > REQUIRE_API_KEY=true
-> PORTAL_API_KEY=chave_recebida_por_email
+> PORTAL_API_KEY=key_received_by_email
 > PORTAL_API_MAX_RPM=80
 > ```
 >
-> Depois de editar o `.env`, reinicie a API (`docker compose up -d`). Passo a passo, testes e erros comuns: [Chaves de acesso](#chaves-de-acesso).
+> After editing `.env`, restart the API (`docker compose up -d`). Step-by-step instructions, tests and common errors: [Access keys](#access-keys).
 
-## Entrega
+## Deliverables
 
-| Componente | Implementação |
+| Component | Implementation |
 |---|---|
-| Automação | Python + Playwright controlando o portal oficial |
-| Execução | Chromium headless, contexto isolado e concorrência configurável |
-| Coleta | Panorama da pessoa e detalhes de Auxílio Brasil, Auxílio Emergencial e Bolsa Família |
-| Evidência | Screenshot PNG codificado em Base64 dentro do JSON |
-| API | FastAPI, OpenAPI/Swagger, autenticação por `X-API-Key` e HTTPS |
-| MCP | Servidor MCP em `/mcp` (Streamable HTTP) com a tool `consultar_pessoa`, no mesmo processo da API |
-| Modelo local | Ollama como LLM local, conectado ao robô pelo MCP |
-| Hiperautomação | n8n com nós oficiais Google Drive e Google Sheets |
-| Implantação | Docker em VPS, disponível por HTTPS em domínio neutro |
-| Histórico | PostgreSQL com todas as consultas, listadas e reabertas pelo front |
-| Testes | 39 testes automatizados e validação estrutural do workflow n8n |
+| Automation | Python + Playwright driving the official portal |
+| Execution | Headless Chromium, isolated context and configurable concurrency |
+| Data collection | Person overview and details of Auxílio Brasil, Auxílio Emergencial and Bolsa Família |
+| Evidence | PNG screenshot encoded as Base64 inside the JSON |
+| API | FastAPI, OpenAPI/Swagger, `X-API-Key` authentication and HTTPS |
+| MCP | MCP server at `/mcp` (Streamable HTTP) with the `consultar_pessoa` tool, in the same process as the API |
+| Local model | Ollama as a local LLM, connected to the robot through MCP |
+| Hyperautomation | n8n with the official Google Drive and Google Sheets nodes |
+| Deployment | Docker on a VPS, available over HTTPS on a neutral domain |
+| History | PostgreSQL with every query, listed and reopened from the front end |
+| Tests | 39 automated tests and structural validation of the n8n workflow |
 
-Links da aplicação:
+Application links:
 
 - API: [https://python-rpa-9f3d.72-60-12-215.sslip.io](https://python-rpa-9f3d.72-60-12-215.sslip.io)
 - Swagger: [https://python-rpa-9f3d.72-60-12-215.sslip.io/docs](https://python-rpa-9f3d.72-60-12-215.sslip.io/docs)
 - OpenAPI: [https://python-rpa-9f3d.72-60-12-215.sslip.io/openapi.json](https://python-rpa-9f3d.72-60-12-215.sslip.io/openapi.json)
 - Health check: [https://python-rpa-9f3d.72-60-12-215.sslip.io/health](https://python-rpa-9f3d.72-60-12-215.sslip.io/health)
 
-Os endpoints de consulta exigem uma chave no cabeçalho `X-API-Key`. A chave de avaliação é compartilhada separadamente e não fica no repositório. O endpoint `/mcp` usa a mesma chave. Veja [Chaves de acesso](#chaves-de-acesso) para a diferença entre essa chave e a chave do governo.
+The query endpoints require a key in the `X-API-Key` header. The evaluation key is shared separately and is not stored in the repository. The `/mcp` endpoint uses the same key. See [Access keys](#access-keys) for the difference between this key and the government key.
 
-## Fluxo da solução
+## Solution flow
 
 ```mermaid
 flowchart LR
-    A[Entrada: nome, CPF ou NIS] --> B[API FastAPI]
-    O[Ollama: modelo local] <--> H[Cliente MCP]
-    H --> N[Servidor MCP /mcp]
+    A[Input: name, CPF or NIS] --> B[FastAPI API]
+    O[Ollama: local model] <--> H[MCP client]
+    H --> N[MCP server /mcp]
     N --> B
-    B --> C[Playwright headless]
+    B --> C[Headless Playwright]
     C --> D[Portal da Transparência]
-    D --> E[Panorama + benefícios + screenshot]
-    E --> F[JSON estruturado]
+    D --> E[Overview + benefits + screenshot]
+    E --> F[Structured JSON]
     F --> G[n8n]
-    G --> H2[Google Drive: arquivo JSON]
-    H2 --> I[Google Sheets: registro e link]
+    G --> H2[Google Drive: JSON file]
+    H2 --> I[Google Sheets: record and link]
 ```
 
-O robô abre a página inicial do portal, navega até a busca de pessoas, informa o termo e o filtro social, escolhe o primeiro resultado e coleta o panorama. Em seguida, abre os detalhes dos benefícios previstos no enunciado, percorre a paginação e devolve um único documento JSON.
+The robot opens the portal's home page, navigates to the people search, enters the term and the social filter, picks the first result and collects the overview. It then opens the details of the benefits required by the assignment, walks through the pagination and returns a single JSON document.
 
-Cada consulta cria um contexto de navegador separado. Um semáforo limita a quantidade de navegadores simultâneos sem compartilhar cookies, páginas ou dados entre execuções.
+Each query creates a separate browser context. A semaphore limits the number of simultaneous browsers without sharing cookies, pages or data between executions.
 
-O servidor MCP roda no mesmo processo da API e chama o mesmo robô, então o semáforo vale também para consultas feitas pelo MCP. O Ollama não fala MCP sozinho: o modelo decide quando chamar a ferramenta (tool calling) e um cliente MCP, que pode ser o script `scripts/chat_ollama.py` ou um agente do n8n, executa a chamada ao `/mcp` e devolve o resultado ao modelo.
+The MCP server runs in the same process as the API and calls the same robot, so the semaphore also applies to queries made through MCP. Ollama does not speak MCP by itself: the model decides when to call the tool (tool calling) and an MCP client, which can be the `scripts/chat_ollama.py` script or an n8n agent, performs the call to `/mcp` and returns the result to the model.
 
-## Executar localmente
+## Run locally
 
-Requisitos: Python 3.11 ou superior e Node.js apenas para validar o workflow n8n. O [Ollama](https://ollama.com/) é necessário só para usar o modelo local.
+Requirements: Python 3.11 or higher, and Node.js only to validate the n8n workflow. [Ollama](https://ollama.com/) is needed only if you want to use the local model.
 
 ```bash
 python3 -m venv .venv
@@ -78,54 +78,54 @@ cp .env.example .env
 uvicorn app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Para instalar só as dependências de execução, sem o pacote em modo editável, use `pip install -r requirements.txt`.
+To install only the runtime dependencies, without the editable package, use `pip install -r requirements.txt`.
 
-No Windows (PowerShell), ative o ambiente com `.\.venv\Scripts\Activate.ps1`, defina a variável com `$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.browsers"` e copie o arquivo com `Copy-Item .env.example .env`.
+On Windows (PowerShell), activate the environment with `.\.venv\Scripts\Activate.ps1`, set the variable with `$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.browsers"` and copy the file with `Copy-Item .env.example .env`.
 
-No Linux, instale também as dependências do Chromium:
+On Linux, also install Chromium's system dependencies:
 
 ```bash
 python -m playwright install --with-deps chromium
 ```
 
-Abra `http://127.0.0.1:8000/docs` para usar o Swagger.
+Open `http://127.0.0.1:8000/docs` to use Swagger.
 
-### Linha de comando
-
-```bash
-python -m app.cli 'NOME, CPF OU NIS' --output outputs/consulta.json
-```
-
-Use `--social` para marcar o filtro de beneficiário de programa social:
+### Command line
 
 ```bash
-python -m app.cli 'NOME, CPF OU NIS' --social --output outputs/consulta.json
+python -m app.cli 'NAME, CPF OR NIS' --output outputs/consulta.json
 ```
 
-O processo retorna código `0` para coleta completa e `2` para resultado parcial ou erro estruturado.
+Use `--social` to check the social program beneficiary filter:
+
+```bash
+python -m app.cli 'NAME, CPF OR NIS' --social --output outputs/consulta.json
+```
+
+The process returns exit code `0` for a complete collection and `2` for a partial result or a structured error.
 
 ### API
 
 ```bash
 curl -X POST http://127.0.0.1:8000/consultas \
   -H 'Content-Type: application/json' \
-  -H 'X-API-Key: SUA_CHAVE' \
-  -d '{"termo":"NOME, CPF OU NIS","beneficiario_programa_social":false}' \
+  -H 'X-API-Key: YOUR_KEY' \
+  -d '{"termo":"NAME, CPF OR NIS","beneficiario_programa_social":false}' \
   --output resultado.json
 ```
 
-`GET /health` verifica o processo da API. A disponibilidade do Portal da Transparência é avaliada durante cada consulta.
+`GET /health` checks the API process. The availability of the Portal da Transparência is evaluated during each query.
 
-### Histórico no PostgreSQL
+### History in PostgreSQL
 
-Com `DATABASE_URL` definido, cada resposta de `POST /consultas` (sucesso, parcial ou erro) é gravada na tabela `consultas`, criada automaticamente no primeiro uso. O JSON completo fica na coluna `resultado` (`jsonb`), e termo, nome, CPF, NIS, status e data ficam em colunas próprias para filtro. Se o banco cair, a consulta continua respondendo normalmente e a falha aparece só no log.
+With `DATABASE_URL` set, every `POST /consultas` response (success, partial or error) is written to the `consultas` table, which is created automatically on first use. The full JSON is stored in the `resultado` column (`jsonb`), while the term, name, CPF, NIS, status and date have their own columns for filtering. If the database goes down, queries keep responding normally and the failure only shows up in the log.
 
-| Rota | O que faz |
+| Route | What it does |
 |---|---|
-| `GET /consultas?limite=20&busca=maria` | Lista as consultas mais recentes (resumo), com filtro opcional por termo ou nome |
-| `GET /consultas/{consulta_id}` | Devolve o JSON completo de uma consulta gravada |
+| `GET /consultas?limite=20&busca=maria` | Lists the most recent queries (summary), with an optional filter by term or name |
+| `GET /consultas/{consulta_id}` | Returns the full JSON of a stored query |
 
-As duas rotas usam o mesmo `X-API-Key` e respondem `503` com `HISTORICO_DESATIVADO` quando `DATABASE_URL` está vazio. No front, o cartão **03 · Consultas anteriores** lista o histórico; clicar em um item reabre o resultado, com evidência, download do JSON e exportação para o Google.
+Both routes use the same `X-API-Key` and respond with `503` and `HISTORICO_DESATIVADO` when `DATABASE_URL` is empty. In the front end, card **03 · Previous queries** (*Consultas anteriores*) lists the history; clicking an item reopens the result, with evidence, JSON download and export to Google.
 
 ```bash
 docker compose exec postgres psql -U observa -c "SELECT consultado_em, termo, nome, status FROM consultas ORDER BY consultado_em DESC LIMIT 10"
@@ -133,53 +133,53 @@ docker compose exec postgres psql -U observa -c "SELECT consultado_em, termo, no
 
 ### MCP
 
-Com a API rodando, o servidor MCP fica disponível em `http://127.0.0.1:8000/mcp` (Streamable HTTP, sem estado), com o cabeçalho `X-API-Key`. Ele expõe uma tool:
+With the API running, the MCP server is available at `http://127.0.0.1:8000/mcp` (Streamable HTTP, stateless), with the `X-API-Key` header. It exposes one tool:
 
-| Tool | Parâmetros | Descrição |
+| Tool | Parameters | Description |
 |---|---|---|
-| `consultar_pessoa` | `termo`, `beneficiario_programa_social` (padrão `false`), `incluir_evidencia` (padrão `false`) | Consulta a pessoa e devolve o mesmo JSON do [contrato do resultado](#contrato-do-resultado) |
+| `consultar_pessoa` | `termo`, `beneficiario_programa_social` (default `false`), `incluir_evidencia` (default `false`) | Queries the person and returns the same JSON as the [result contract](#result-contract) |
 
-Por padrão a tool devolve `evidencia` como `null`, porque o screenshot Base64 ocupa muito espaço no contexto de um modelo local. Use `incluir_evidencia=true` quando precisar da imagem. `status`, `codigo` e `mensagem` são preservados.
+By default the tool returns `evidencia` as `null`, because the Base64 screenshot takes up a lot of space in a local model's context. Use `incluir_evidencia=true` when you need the image. `status`, `codigo` and `mensagem` are preserved.
 
-Para testar, conecte o MCP Inspector ao endpoint:
+To test, connect the MCP Inspector to the endpoint:
 
 ```bash
 npx @modelcontextprotocol/inspector
 ```
 
-Para conectar o Claude Code:
+To connect Claude Code:
 
 ```bash
 claude mcp add --transport http portal-transparencia \
   http://127.0.0.1:8000/mcp \
-  --header "X-API-Key: SUA_CHAVE"
+  --header "X-API-Key: YOUR_KEY"
 ```
 
-### Modelo local com Ollama
+### Local model with Ollama
 
 ```bash
 ollama serve
 ollama pull qwen2.5:7b
 ```
 
-Use um modelo com suporte a tool calling, como `qwen2.5`, `llama3.1` ou `mistral-nemo`. Depois, com a API rodando, abra o chat no terminal:
+Use a model that supports tool calling, such as `qwen2.5`, `llama3.1` or `mistral-nemo`. Then, with the API running, open the terminal chat:
 
 ```bash
 export MCP_URL=http://127.0.0.1:8000/mcp
-export MCP_API_KEY=SUA_CHAVE
+export MCP_API_KEY=YOUR_KEY
 export OLLAMA_MODEL=qwen2.5:7b
 python scripts/chat_ollama.py
 ```
 
-O script lista as tools do servidor MCP, entrega ao modelo, executa as chamadas pedidas e devolve o resultado até haver a resposta final.
+The script lists the MCP server's tools, hands them to the model, executes the requested calls and returns the results until there is a final answer.
 
-No n8n, o mesmo resultado sai de um nó **AI Agent** com **Ollama Chat Model** (URL base do Ollama; em Docker, `http://host.docker.internal:11434`) e **MCP Client Tool** apontando para `/mcp` com o cabeçalho `X-API-Key`.
+In n8n, the same result comes from an **AI Agent** node with **Ollama Chat Model** (Ollama base URL; in Docker, `http://host.docker.internal:11434`) and **MCP Client Tool** pointing to `/mcp` with the `X-API-Key` header.
 
-Uma consulta pode levar até `QUERY_TIMEOUT_SECONDS`, e a resposta do modelo local soma tempo a isso. Os dados consultados ficam na sua máquina ou rede quando o cliente e o Ollama também são locais; mantenha `REQUIRE_API_KEY=true`.
+A query can take up to `QUERY_TIMEOUT_SECONDS`, and the local model's response time adds to that. The queried data stays on your machine or network when the client and Ollama are also local; keep `REQUIRE_API_KEY=true`.
 
-### Tudo com um comando
+### Everything with one command
 
-Requisitos: [Git](https://git-scm.com/), Python 3.11 ou superior e [Docker Desktop](https://www.docker.com/products/docker-desktop/) aberto.
+Requirements: [Git](https://git-scm.com/), Python 3.11 or higher and [Docker Desktop](https://www.docker.com/products/docker-desktop/) running.
 
 ```bash
 git clone https://github.com/GeorgeLucas1/rpa-portal-transparencia.git
@@ -187,27 +187,27 @@ cd rpa-portal-transparencia
 python run.py
 ```
 
-Não é preciso criar `.venv` nem instalar dependências: o `run.py` usa só a biblioteca padrão do Python e a API roda dentro do contêiner. Ele:
+You don't need to create a `.venv` or install dependencies: `run.py` uses only the Python standard library and the API runs inside the container. It:
 
-1. cria o `.env` a partir do `.env.example`, se ainda não existir;
-2. constrói a imagem e sobe a API e o n8n (`docker compose up -d --build`);
-3. espera a API (`/health`) e o n8n (`/healthz`) responderem;
-4. importa o workflow no n8n na primeira execução;
-5. abre `http://127.0.0.1:8000` no navegador e mostra os logs.
+1. creates `.env` from `.env.example` if it doesn't exist yet;
+2. builds the image and starts the API and n8n (`docker compose up -d --build`);
+3. waits for the API (`/health`) and n8n (`/healthz`) to respond;
+4. imports the workflow into n8n on the first run;
+5. opens `http://127.0.0.1:8000` in the browser and shows the logs.
 
-`Ctrl+C` para os contêineres. A primeira execução demora mais porque baixa o Chromium; nas seguintes, use `python run.py --no-build`.
+`Ctrl+C` stops the containers. The first run takes longer because it downloads Chromium; on later runs, use `python run.py --no-build`.
 
-| Comando | O que faz |
+| Command | What it does |
 |---|---|
-| `python run.py` | API e n8n em contêineres |
-| `python run.py --no-build` | Sobe sem reconstruir a imagem |
-| `python run.py --no-browser` | Não abre o navegador |
-| `python run.py --local` | API no Python local; n8n e PostgreSQL em contêiner |
-| `python run.py down` | Remove os contêineres (os volumes são mantidos) |
+| `python run.py` | API and n8n in containers |
+| `python run.py --no-build` | Starts without rebuilding the image |
+| `python run.py --no-browser` | Doesn't open the browser |
+| `python run.py --local` | API on local Python; n8n and PostgreSQL in containers |
+| `python run.py down` | Removes the containers (volumes are kept) |
 
-O modo `--local` serve para desenvolver sem reconstruir a imagem a cada alteração. Ele exige o ambiente da seção [Executar localmente](#executar-localmente) com o `.venv` ativo, instala o Chromium em `.browsers` se faltar e aponta o n8n para `http://host.docker.internal:8000`. Se o n8n não alcançar a API, use `python run.py --local --host 0.0.0.0` com `REQUIRE_API_KEY=true`, porque assim a API fica visível na rede local.
+The `--local` mode is for developing without rebuilding the image after every change. It requires the environment from the [Run locally](#run-locally) section with `.venv` active, installs Chromium into `.browsers` if it's missing and points n8n to `http://host.docker.internal:8000`. If n8n can't reach the API, use `python run.py --local --host 0.0.0.0` with `REQUIRE_API_KEY=true`, since this makes the API visible on the local network.
 
-No Windows, se `python` não for reconhecido, use `py run.py`.
+On Windows, if `python` isn't recognized, use `py run.py`.
 
 ### Docker
 
@@ -215,216 +215,218 @@ No Windows, se `python` não for reconhecido, use `py run.py`.
 docker compose up --build
 ```
 
-A imagem inclui Python, Chromium e as dependências de sistema do Playwright.
+The image includes Python, Chromium and Playwright's system dependencies.
 
-O mesmo `compose.yaml` sobe três contêineres na rede `rpa-network`:
+The same `compose.yaml` starts three containers on the `rpa-network` network:
 
-| Serviço | Endereço no computador | Endereço dentro da rede |
+| Service | Address on your computer | Address inside the network |
 |---|---|---|
 | `api` | `http://127.0.0.1:8000` | `http://api:8000` |
 | `n8n` | `http://localhost:5678` | `http://n8n:5678` |
 | `postgres` | `127.0.0.1:5432` | `postgres:5432` |
 
-O PostgreSQL guarda o [histórico das consultas](#histórico-no-postgresql) no volume `postgres-data`; usuário, senha e banco vêm de `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` (padrão `observa`).
+PostgreSQL stores the [query history](#history-in-postgresql) in the `postgres-data` volume; user, password and database come from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` (default `observa`).
 
-O n8n não precisa ser instalado no computador. Na primeira vez, importe o workflow dentro do contêiner:
+n8n doesn't need to be installed on your computer. The first time, import the workflow inside the container:
 
 ```bash
 docker compose exec n8n n8n import:workflow --input=/workflows/n8n-consulta-google.json
 ```
 
-O nó **Entrada** usa `RPA_API_URL` (`http://api:8000` no compose) e, sem essa variável, a API pública. Dados e credenciais do n8n ficam no volume `n8n-data`. No Google Cloud, cadastre a URL de retorno OAuth `http://localhost:5678/rest/oauth2-credential/callback`.
+The **Entrada** node uses `RPA_API_URL` (`http://api:8000` in the compose file) and, without that variable, the public API. n8n data and credentials live in the `n8n-data` volume. In Google Cloud, register the OAuth redirect URL `http://localhost:5678/rest/oauth2-credential/callback`.
 
-## Chaves de acesso
+## Access keys
 
-O projeto usa **duas chaves diferentes**, e uma não substitui a outra:
+The project uses **two different keys**, and one does not replace the other:
 
-| Variável no `.env` | Para que serve | Quem cria | Onde é usada |
+| Variable in `.env` | What it's for | Who creates it | Where it's used |
 |---|---|---|---|
-| `API_KEY` | proteger a **sua** API (`localhost:8000`) | você mesmo | header `X-API-Key`: campo "Chave de acesso da API" do front, n8n, `curl`, MCP |
-| `PORTAL_API_KEY` | consultar a API de Dados do **governo** por CPF/NIS, sem CAPTCHA | o Portal da Transparência, por e-mail | header `chave-api-dados`, enviado pelo próprio projeto |
+| `API_KEY` | protecting **your** API (`localhost:8000`) | you | `X-API-Key` header: the "API access key" field in the front end, n8n, `curl`, MCP |
+| `PORTAL_API_KEY` | querying the **government** Data API by CPF/NIS, without a CAPTCHA | Portal da Transparência, by e-mail | `chave-api-dados` header, sent by the project itself |
 
-As duas ficam no arquivo `.env`, na mesma pasta do `compose.yaml`. Crie-o a partir do modelo com `cp .env.example .env` (no PowerShell, `Copy-Item .env.example .env`). O `.env` está no `.gitignore` e não deve ser versionado nem compartilhado.
+Both live in the `.env` file, in the same folder as `compose.yaml`. Create it from the template with `cp .env.example .env` (in PowerShell, `Copy-Item .env.example .env`). `.env` is in `.gitignore` and must not be versioned or shared.
 
-### `API_KEY`: a senha da sua API
+### `API_KEY`: your API's password
 
-É uma senha que **você inventa**. Quando ela está definida, toda chamada a `/consultas`, `/integracoes/...` e `/mcp` precisa enviar o mesmo valor no header `X-API-Key`; sem ele, a resposta é **401**. Ela nunca é enviada ao Portal da Transparência e **não resolve o CAPTCHA**.
+It's a password that **you make up**. When it's set, every call to `/consultas`, `/integracoes/...` and `/mcp` must send the same value in the `X-API-Key` header; without it, the response is **401**. It is never sent to the Portal da Transparência and **does not solve the CAPTCHA**.
 
-**Quando preencher.** Rodando só em `127.0.0.1`, ela é opcional. É obrigatória quando a API fica acessível a outras máquinas: VPS, Easypanel, Render ou `--host 0.0.0.0`. Nesses casos, use também `REQUIRE_API_KEY=true`, para a API se recusar a iniciar sem chave.
+**When to fill it in.** If you run only on `127.0.0.1`, it's optional. It's mandatory when the API is reachable from other machines: VPS, Easypanel, Render or `--host 0.0.0.0`. In those cases, also use `REQUIRE_API_KEY=true`, so the API refuses to start without a key.
 
-**Formato.** Texto livre, sem espaços, sem aspas e sem `#`. Recomenda-se um valor aleatório e longo, por exemplo 64 caracteres hexadecimais. Gere com um destes comandos:
+**Format.** Free text, with no spaces, quotes or `#`. A long random value is recommended, for example 64 hexadecimal characters. Generate it with one of these commands:
 
 ```bash
 openssl rand -hex 32
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-**Como configurar.** No `.env`:
+**How to configure it.** In `.env`:
 
 ```dotenv
-API_KEY=cole_aqui_o_valor_gerado
+API_KEY=paste_the_generated_value_here
 REQUIRE_API_KEY=true
 ```
 
-Não use um valor copiado de exemplos ou da documentação: quem lê o repositório também o conhece.
+Don't use a value copied from examples or documentation: anyone who reads the repository knows it too.
 
-O `.env` só é lido quando a API inicia. Depois de editar, reinicie: `docker compose up -d` (Docker) ou `python run.py --no-build`.
+`.env` is only read when the API starts. After editing it, restart: `docker compose up -d` (Docker) or `python run.py --no-build`.
 
-**Como usar.**
+**How to use it.**
 
-- **Front** (`http://localhost:8000`): abra "Chave de acesso da API" e cole o mesmo valor do `API_KEY`. Ele vale só para aquela aba e não é salvo.
-- **curl**: `-H 'X-API-Key: SEU_VALOR'` (exemplo em [API](#api)).
-- **n8n**: credencial *Header Auth* com nome `X-API-Key` e o mesmo valor (ver [Configurar e ativar o workflow no n8n](#configurar-e-ativar-o-workflow-no-n8n)).
+- **Front end** (`http://localhost:8000`): open "API access key" (*Chave de acesso da API*) and paste the same value as `API_KEY`. It is valid only for that tab and is not saved.
+- **curl**: `-H 'X-API-Key: YOUR_VALUE'` (example in [API](#api)).
+- **n8n**: *Header Auth* credential with name `X-API-Key` and the same value (see [Configure and activate the workflow in n8n](#configure-and-activate-the-workflow-in-n8n)).
 
-| `API_KEY` | `REQUIRE_API_KEY` | Comportamento |
+| `API_KEY` | `REQUIRE_API_KEY` | Behavior |
 |---|---|---|
-| vazia | `false` | aceita chamadas sem chave (só para uso local) |
-| preenchida | qualquer | exige `X-API-Key` igual ao valor; senão, 401 |
-| vazia | `true` | a API não inicia (`API_KEY é obrigatória neste ambiente`) |
+| empty | `false` | accepts calls without a key (local use only) |
+| set | any | requires `X-API-Key` equal to the value; otherwise, 401 |
+| empty | `true` | the API doesn't start (`API_KEY é obrigatória neste ambiente`, i.e. "API_KEY is required in this environment") |
 
-### `PORTAL_API_KEY`: a chave do governo
+### `PORTAL_API_KEY`: the government key
 
-É a chave da **API de Dados** oficial do Portal da Transparência. Com ela, consultas por **CPF ou NIS** não abrem o site e, por isso, não caem no CAPTCHA do AWS WAF (ver [Alternativa oficial: API de Dados](#alternativa-oficial-api-de-dados)). Busca por nome continua pelo site.
+This is the key for the Portal da Transparência's official **Data API**. With it, queries by **CPF or NIS** don't open the website and therefore don't hit the AWS WAF CAPTCHA (see [Official alternative: Data API](#official-alternative-data-api)). Search by name still goes through the website.
 
-**Como obter (gratuito).**
+**How to get it (free).**
 
-1. Acesse [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados) e escolha a opção de cadastro.
-2. Entre com sua conta **gov.br** e confirme o e-mail.
-3. A chave chega por e-mail. Ela é pessoal: não a compartilhe nem crie várias para somar limites.
+1. Go to [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados) and choose the registration option.
+2. Sign in with your **gov.br** account and confirm your e-mail.
+3. The key arrives by e-mail. It's personal: don't share it or create several keys to add up limits.
 
-**Formato.** Copie a chave **exatamente** como veio no e-mail, sem aspas, espaços ou quebra de linha:
+**Format.** Copy the key **exactly** as it came in the e-mail, with no quotes, spaces or line breaks:
 
 ```dotenv
-PORTAL_API_KEY=cole_aqui_a_chave_recebida_por_email
+PORTAL_API_KEY=paste_the_key_received_by_email_here
 PORTAL_API_MAX_RPM=80
 ```
 
-`PORTAL_API_MAX_RPM` é o teto de requisições por minuto do projeto, abaixo do limite oficial (90/min das 06:00 às 23:59; 300/min das 00:00 às 05:59). Reinicie a API depois de editar.
+`PORTAL_API_MAX_RPM` is the project's cap on requests per minute, set below the official limit (90/min from 06:00 to 23:59; 300/min from 00:00 to 05:59). Restart the API after editing.
 
-**Não cole essa chave no campo do front.** Aquele campo é para a `API_KEY`; a chave do governo só funciona no `.env`.
+**Don't paste this key into the front-end field.** That field is for `API_KEY`; the government key only works in `.env`.
 
-**Testar a chave** direto na API do governo, antes de usar no projeto:
+**Test the key** directly against the government API before using it in the project:
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" \
-  -H "chave-api-dados: SUA_CHAVE_GOV" \
-  "https://api.portaldatransparencia.gov.br/api-de-dados/pessoa-fisica?cpf=SEU_CPF"
+  -H "chave-api-dados: YOUR_GOV_KEY" \
+  "https://api.portaldatransparencia.gov.br/api-de-dados/pessoa-fisica?cpf=YOUR_CPF"
 ```
 
-`200` indica chave válida; `401` ou `403`, chave errada ou ainda não ativada.
+`200` means a valid key; `401` or `403` means a wrong key or one that isn't activated yet.
 
-**Conferir se foi aplicada.** Faça uma consulta por CPF no front ou em `/consultas`. O resultado deve trazer `"modo_execucao": "api_oficial"`; se vier `"autonomo"`, a chave não foi carregada. No Docker, confira sem exibir o valor:
+**Check that it was applied.** Run a query by CPF in the front end or at `/consultas`. The result should include `"modo_execucao": "api_oficial"`; if it says `"autonomo"`, the key wasn't loaded. On Docker, check without displaying the value:
 
 ```bash
 docker compose exec api sh -c 'test -n "$PORTAL_API_KEY" && echo definida || echo vazia'
 ```
 
-### Erros comuns
+(The command prints `definida` if the key is set and `vazia` if it's empty.)
 
-| Sintoma | Causa provável | O que fazer |
+### Common errors
+
+| Symptom | Likely cause | What to do |
 |---|---|---|
-| HTTP 401 `Chave de API inválida` | `X-API-Key` diferente do `API_KEY` | cole no front/n8n exatamente o valor do `.env` |
-| editei o `.env` e nada mudou | API não reiniciada, ou `.env` em outra pasta | reinicie; o `.env` deve estar ao lado do `compose.yaml` de onde você roda o `docker compose` (no WSL, a pasta do WSL, não a do Windows) |
-| CPF retorna `PORTAL_BLOQUEADO` (502) | `PORTAL_API_KEY` vazia ou não carregada | preencha, reinicie e confira `modo_execucao` |
-| `CHAVE_PORTAL_INVALIDA` (502) | o governo recusou a chave | teste-a com o `curl` acima; confira se foi copiada inteira |
-| `LIMITE_API_EXCEDIDO` (429) | limite por minuto da chave atingido | aguarde um minuto; reduza `PORTAL_API_MAX_RPM` e `MAX_CONCURRENT`; cargas grandes de madrugada |
-| nome retorna `PORTAL_BLOQUEADO` | busca por nome usa o site, que tem CAPTCHA | consulte por CPF/NIS |
+| HTTP 401 `Chave de API inválida` | `X-API-Key` differs from `API_KEY` | paste exactly the value from `.env` into the front end/n8n |
+| I edited `.env` and nothing changed | API not restarted, or `.env` in another folder | restart; `.env` must sit next to the `compose.yaml` you run `docker compose` from (on WSL, the WSL folder, not the Windows one) |
+| CPF returns `PORTAL_BLOQUEADO` (502) | `PORTAL_API_KEY` empty or not loaded | fill it in, restart and check `modo_execucao` |
+| `CHAVE_PORTAL_INVALIDA` (502) | the government rejected the key | test it with the `curl` above; check that it was copied in full |
+| `LIMITE_API_EXCEDIDO` (429) | the key's per-minute limit was reached | wait a minute; lower `PORTAL_API_MAX_RPM` and `MAX_CONCURRENT`; run large loads overnight |
+| name returns `PORTAL_BLOQUEADO` | search by name uses the website, which has a CAPTCHA | query by CPF/NIS |
 
-## Contrato do resultado
+## Result contract
 
-| Campo | Conteúdo |
+| Field | Content |
 |---|---|
-| `consulta_id` | UUID exclusivo da execução |
-| `consultado_em` | data e hora UTC |
-| `status` | `sucesso`, `parcial` ou `erro` |
-| `codigo` e `mensagem` | diagnóstico estruturado |
-| `pessoa` | nome, CPF/NIS disponíveis, localidade e panorama |
-| `beneficios` | programa, URL, páginas extraídas, completude e erro |
-| `evidencia` | MIME type e screenshot Base64 do panorama |
-| `etapa` e `duracao_ms` | etapa alcançada e duração total |
-| `diagnostico` | URL, título e captura da página em uma falha externa |
+| `consulta_id` | unique UUID of the execution |
+| `consultado_em` | UTC date and time |
+| `status` | `sucesso`, `parcial` or `erro` |
+| `codigo` and `mensagem` | structured diagnostics |
+| `pessoa` | name, available CPF/NIS, location and overview |
+| `beneficios` | program, URL, extracted pages, completeness and error |
+| `evidencia` | MIME type and Base64 screenshot of the overview |
+| `etapa` and `duracao_ms` | stage reached and total duration |
+| `diagnostico` | URL, title and page capture on an external failure |
 
-Os snapshots preservam URL, texto, campos e tabelas conforme exibidos. Campos ausentes ficam `null`, valores monetários permanecem textuais e o CPF mascarado não é reconstruído.
+The snapshots preserve URL, text, fields and tables as displayed. Missing fields are `null`, monetary values remain textual and the masked CPF is not reconstructed.
 
-HTTP 200 representa coleta completa ou parcial; o consumidor deve conferir `status` e `beneficios[].completo`. A API usa 401 para autenticação inválida, 404 para ausência de pessoa, 422 para entrada inválida, 502 para bloqueio/falha do portal e 504 para prazo excedido.
+HTTP 200 represents a complete or partial collection; the consumer must check `status` and `beneficios[].completo`. The API uses 401 for invalid authentication, 404 for a person not found, 422 for invalid input, 502 for portal blocking/failure and 504 for an exceeded deadline.
 
-## CAPTCHA e bloqueio automatizado
+## CAPTCHA and automated blocking
 
-O Portal da Transparência pode apresentar uma verificação humana do AWS WAF conforme rede, IP e sessão. O enunciado exige automação headless, mas não exige resolver CAPTCHA.
+The Portal da Transparência may present an AWS WAF human verification depending on network, IP and session. The assignment requires headless automation but does not require solving a CAPTCHA.
 
-Quando a verificação aparece, o robô não tenta burlá-la. Ele encerra a consulta com `status=erro`, `codigo=PORTAL_BLOQUEADO` e uma captura de diagnóstico. Esse tratamento evita timeout silencioso e impede que dados incompletos sejam apresentados como uma coleta válida.
+When the verification appears, the robot does not try to bypass it. It ends the query with `status=erro`, `codigo=PORTAL_BLOQUEADO` and a diagnostic capture. This handling avoids a silent timeout and prevents incomplete data from being presented as a valid collection.
 
-### Alternativa oficial: API de Dados
+### Official alternative: Data API
 
-Com `PORTAL_API_KEY` preenchida (chave gratuita do cadastro gov.br em [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados)), as consultas por **CPF/NIS** usam a API de Dados oficial em vez do site, sem CAPTCHA. O resultado sai com `modo_execucao=api_oficial`: a pessoa vem de `/pessoa-fisica` e cada benefício indicado nela é paginado no endpoint do programa. Não há screenshot, porque não há navegador. Busca por **nome** continua pelo site, já que a API não a oferece.
+With `PORTAL_API_KEY` filled in (a free key from the gov.br registration at [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados)), queries by **CPF/NIS** use the official Data API instead of the website, with no CAPTCHA. The result comes out with `modo_execucao=api_oficial`: the person is retrieved from `/pessoa-fisica` and each benefit indicated there is paginated at the program's endpoint. There is no screenshot, because there is no browser. Search by **name** still goes through the website, since the API doesn't offer it.
 
-O projeto limita as chamadas a `PORTAL_API_MAX_RPM` por minuto. Quando a API responde HTTP 429, ele aguarda e repete duas vezes; se o limite persistir, devolve `codigo=LIMITE_API_EXCEDIDO` com HTTP 429. Uma chave recusada gera `CHAVE_PORTAL_INVALIDA`.
+The project limits calls to `PORTAL_API_MAX_RPM` per minute. When the API responds with HTTP 429, it waits and retries twice; if the limit persists, it returns `codigo=LIMITE_API_EXCEDIDO` with HTTP 429. A rejected key produces `CHAVE_PORTAL_INVALIDA`.
 
-Os seletores e a extração foram validados no layout real em sessão autorizada. A suíte automatizada usa Chromium real e páginas locais determinísticas, sem enviar CPFs ou nomes ao governo.
+The selectors and extraction were validated against the real layout in an authorized session. The automated suite uses real Chromium and deterministic local pages, without sending CPFs or names to the government.
 
-## Bônus: n8n, Drive e Sheets
+## Bonus: n8n, Drive and Sheets
 
-O arquivo [workflows/n8n-consulta-google.json](workflows/n8n-consulta-google.json) contém o workflow completo:
+The file [workflows/n8n-consulta-google.json](workflows/n8n-consulta-google.json) contains the complete workflow:
 
-1. o gatilho **1. Configurar armazenamento** cria a pasta, a planilha e suas colunas na conta Google conectada;
-2. o webhook **2. Receber consulta** recebe `termo` e `beneficiario_programa_social` e localiza esses recursos pelo nome;
-3. chama `POST /consultas` com `X-API-Key`;
-4. valida o contrato retornado;
-5. converte o resultado integral em um arquivo JSON;
-6. envia o arquivo para a pasta criada com o nó oficial **Google Drive**;
-7. registra `consulta_id`, nome, CPF, data/hora, link do JSON, status e código no nó oficial **Google Sheets**;
-8. devolve um recibo com os links do arquivo e da planilha.
+1. the trigger **1. Configurar armazenamento** creates the folder, the spreadsheet and its columns in the connected Google account;
+2. the webhook **2. Receber consulta** receives `termo` and `beneficiario_programa_social` and finds those resources by name;
+3. it calls `POST /consultas` with `X-API-Key`;
+4. it validates the returned contract;
+5. it converts the full result into a JSON file;
+6. it uploads the file to the created folder with the official **Google Drive** node;
+7. it records `consulta_id`, name, CPF, date/time, JSON link, status and code in the official **Google Sheets** node;
+8. it returns a receipt with the links to the file and the spreadsheet.
 
-O primeiro gatilho é executado uma vez após a importação. Depois de ativado, o workflow executa automaticamente a cada `POST` recebido no webhook. Nenhum ID de pasta ou planilha é versionado. O nome do arquivo segue o padrão `CONSULTA_ID_DATA_HORA.json`. As credenciais OAuth ficam no cofre de credenciais do n8n e não são exportadas no workflow. O arquivo do Drive permanece privado na conta Google; o fluxo não cria compartilhamento público.
+The first trigger is run once after import. Once activated, the workflow runs automatically on every `POST` received by the webhook. No folder or spreadsheet ID is versioned. The file name follows the pattern `CONSULTA_ID_DATE_TIME.json`. OAuth credentials stay in n8n's credential vault and are not exported in the workflow. The Drive file remains private in the Google account; the flow doesn't create any public sharing.
 
-### Configurar e ativar o workflow no n8n
+### Configure and activate the workflow in n8n
 
-O n8n não lê a pasta `workflows/` sozinho. O `python run.py` importa o fluxo na primeira execução; sem ele, importe manualmente:
+n8n doesn't read the `workflows/` folder on its own. `python run.py` imports the flow on the first run; without it, import manually:
 
 ```bash
 docker compose exec n8n n8n import:workflow --input=/workflows/n8n-consulta-google.json
 ```
 
-O fluxo chega **desativado** e **sem credenciais**, de propósito: o JSON é público no Git e o n8n não ativa um fluxo cujos nós não têm credenciais. A configuração abaixo é feita uma vez e fica salva no volume `n8n-data`.
+The flow arrives **deactivated** and **without credentials**, on purpose: the JSON is public on Git and n8n doesn't activate a flow whose nodes have no credentials. The configuration below is done once and stays saved in the `n8n-data` volume.
 
-**1. Definir a chave da API.** No `.env`, preencha `API_KEY` com um valor próprio e `REQUIRE_API_KEY=true` (formato e como gerar em [Chaves de acesso](#chaves-de-acesso)). Depois reinicie com `python run.py --no-build`.
+**1. Set the API key.** In `.env`, fill in `API_KEY` with your own value and `REQUIRE_API_KEY=true` (format and how to generate it in [Access keys](#access-keys)). Then restart with `python run.py --no-build`.
 
-**2. Criar o cliente OAuth no Google Cloud.**
+**2. Create the OAuth client in Google Cloud.**
 
-1. Em [console.cloud.google.com](https://console.cloud.google.com), crie um projeto.
-2. Em **APIs e serviços → Biblioteca**, ative a **Google Drive API** e a **Google Sheets API**.
-3. Em **Tela de consentimento OAuth**, escolha **Externo** e adicione o seu e-mail Google como **usuário de teste**.
-4. Em **Credenciais → Criar credenciais → ID do cliente OAuth**, escolha **Aplicativo da Web** e cadastre o URI de redirecionamento `http://localhost:5678/rest/oauth2-credential/callback`.
-5. Copie o **Client ID** e o **Client Secret**.
+1. At [console.cloud.google.com](https://console.cloud.google.com), create a project.
+2. Under **APIs & Services → Library**, enable the **Google Drive API** and the **Google Sheets API**.
+3. Under **OAuth consent screen**, choose **External** and add your Google e-mail as a **test user**.
+4. Under **Credentials → Create credentials → OAuth client ID**, choose **Web application** and register the redirect URI `http://localhost:5678/rest/oauth2-credential/callback`.
+5. Copy the **Client ID** and the **Client Secret**.
 
-**3. Criar as credenciais no n8n** (`http://localhost:5678` → **Credentials**):
+**3. Create the credentials in n8n** (`http://localhost:5678` → **Credentials**):
 
-| Credencial | Preenchimento |
+| Credential | Setup |
 |---|---|
-| Google Drive OAuth2 API | Client ID e Client Secret; clique em **Sign in with Google** e entre na sua conta |
-| Google Sheets OAuth2 API | Mesmo Client ID e Secret; entre na mesma conta |
-| Header Auth | Nome `X-API-Key`; valor igual ao `API_KEY` do `.env` |
+| Google Drive OAuth2 API | Client ID and Client Secret; click **Sign in with Google** and sign in to your account |
+| Google Sheets OAuth2 API | Same Client ID and Secret; sign in to the same account |
+| Header Auth | Name `X-API-Key`; value equal to `API_KEY` in `.env` |
 
-Abra o workflow e selecione a credencial correspondente em cada nó: Google Drive, Google Sheets, **Consultar RPA** e o webhook **2. Receber consulta**.
+Open the workflow and select the corresponding credential on each node: Google Drive, Google Sheets, **Consultar RPA** and the webhook **2. Receber consulta**.
 
-**4. Preparar o armazenamento.** Execute uma vez o gatilho **1. Configurar armazenamento**. Ele cria a pasta e a planilha no seu Google Drive.
+**4. Prepare the storage.** Run the **1. Configurar armazenamento** trigger once. It creates the folder and the spreadsheet in your Google Drive.
 
-**5. Ativar.** Ligue a chave **Active** no topo do workflow (em versões novas do n8n, **Publish**). A partir daí, cada `POST` no webhook dispara uma consulta:
+**5. Activate.** Turn on the **Active** switch at the top of the workflow (in newer n8n versions, **Publish**). From then on, every `POST` to the webhook triggers a query:
 
 ```bash
 curl -X POST http://localhost:5678/webhook/consulta-portal-transparencia \
   -H 'Content-Type: application/json' \
-  -H 'X-API-Key: SUA_CHAVE' \
-  -d '{"termo":"NOME, CPF OU NIS","beneficiario_programa_social":false}'
+  -H 'X-API-Key: YOUR_KEY' \
+  -d '{"termo":"NAME, CPF OR NIS","beneficiario_programa_social":false}'
 ```
 
-Não altere `"active"` para `true` no JSON: o fluxo seria importado ativo e sem credenciais, e o webhook falharia em todas as chamadas.
+Don't change `"active"` to `true` in the JSON: the flow would be imported active and without credentials, and the webhook would fail on every call.
 
-Editar o JSON da pasta não atualiza o fluxo que já está no n8n. Como o arquivo não tem id fixo, importar de novo cria uma cópia. `python run.py down` preserva o volume `n8n-data`, mas `docker compose down -v` apaga o fluxo e as credenciais.
+Editing the JSON in the folder doesn't update the flow that is already in n8n. Since the file has no fixed id, importing again creates a copy. `python run.py down` preserves the `n8n-data` volume, but `docker compose down -v` deletes the flow and the credentials.
 
-Detalhes da integração estão em [docs/bonus-google.md](docs/bonus-google.md).
+Integration details are in [docs/bonus-google.md](docs/bonus-google.md).
 
-## Testes
+## Tests
 
 ```bash
 source .venv/bin/activate
@@ -433,48 +435,48 @@ python -m pytest -q
 node scripts/verify_workflow.cjs
 ```
 
-A suíte cobre entrada e autenticação, busca por nome/documento, filtro social, primeiro resultado, três benefícios, paginação, screenshot Base64, ausência de resultados, bloqueio WAF, timeout, coleta parcial, API, isolamento de consultas simultâneas e integração Google simulada.
+The suite covers input and authentication, search by name/document, social filter, first result, three benefits, pagination, Base64 screenshot, no results, WAF blocking, timeout, partial collection, API, isolation of concurrent queries and simulated Google integration.
 
-O script Node valida conexões, scripts, geração do arquivo JSON, presença dos nós oficiais Drive/Sheets, mapeamento das sete colunas e ausência de credenciais no artefato versionado.
+The Node script validates connections, scripts, JSON file generation, the presence of the official Drive/Sheets nodes, the mapping of the seven columns and the absence of credentials in the versioned artifact.
 
-Os testes do MCP (`tests/test_mcp.py`) verificam que a tool `consultar_pessoa` é listada, que a chamada sem `X-API-Key` é rejeitada, que a evidência só é devolvida quando solicitada e que o `status` é preservado. O robô é simulado, sem acessar o portal e sem depender do Ollama.
+The MCP tests (`tests/test_mcp.py`) verify that the `consultar_pessoa` tool is listed, that a call without `X-API-Key` is rejected, that evidence is only returned when requested and that `status` is preserved. The robot is mocked, with no access to the portal and no dependency on Ollama.
 
-## Configuração
+## Configuration
 
-| Variável | Padrão | Função |
+| Variable | Default | Purpose |
 |---|---|---|
-| `HEADLESS` | `true` | executa o Chromium sem janela |
-| `MAX_CONCURRENT` | `3` | consultas simultâneas por processo |
-| `QUERY_TIMEOUT_SECONDS` | `120` | prazo total, incluindo fila |
-| `NAVIGATION_TIMEOUT_MS` | `30000` | prazo das ações Playwright |
-| `WAF_WAIT_MS` | `8000` | espera por uma verificação automática normal |
-| `MAX_DETAIL_PAGES` | `100` | limite de páginas por benefício |
-| `API_KEY` | vazia | valor aceito no cabeçalho `X-API-Key` |
-| `REQUIRE_API_KEY` | `false` | impede iniciar sem chave quando ativado |
-| `PORTAL_API_KEY` | vazia | chave gov.br da API de Dados; com ela, consultas por CPF/NIS usam a API oficial em vez do site |
-| `PORTAL_API_MAX_RPM` | `80` | teto de requisições por minuto à API de Dados (limite oficial: 90/min de dia, 300/min de madrugada) |
-| `MCP_ENABLED` | `true` | habilita o endpoint `/mcp` |
-| `OLLAMA_HOST` | `http://127.0.0.1:11434` | endereço do Ollama, usado por `scripts/chat_ollama.py` |
-| `OLLAMA_MODEL` | `qwen2.5:7b` | modelo local, usado por `scripts/chat_ollama.py` |
-| `MCP_URL` | `http://127.0.0.1:8000/mcp` | endereço do servidor MCP, usado por `scripts/chat_ollama.py` |
-| `MCP_API_KEY` | vazia | chave enviada em `X-API-Key` ao `/mcp`, usada por `scripts/chat_ollama.py` |
+| `HEADLESS` | `true` | runs Chromium without a window |
+| `MAX_CONCURRENT` | `3` | simultaneous queries per process |
+| `QUERY_TIMEOUT_SECONDS` | `120` | total deadline, including queueing |
+| `NAVIGATION_TIMEOUT_MS` | `30000` | deadline for Playwright actions |
+| `WAF_WAIT_MS` | `8000` | wait for a normal automatic verification |
+| `MAX_DETAIL_PAGES` | `100` | page limit per benefit |
+| `API_KEY` | empty | value accepted in the `X-API-Key` header |
+| `REQUIRE_API_KEY` | `false` | prevents starting without a key when enabled |
+| `PORTAL_API_KEY` | empty | gov.br Data API key; with it, CPF/NIS queries use the official API instead of the website |
+| `PORTAL_API_MAX_RPM` | `80` | cap on requests per minute to the Data API (official limit: 90/min by day, 300/min overnight) |
+| `MCP_ENABLED` | `true` | enables the `/mcp` endpoint |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama address, used by `scripts/chat_ollama.py` |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | local model, used by `scripts/chat_ollama.py` |
+| `MCP_URL` | `http://127.0.0.1:8000/mcp` | MCP server address, used by `scripts/chat_ollama.py` |
+| `MCP_API_KEY` | empty | key sent in `X-API-Key` to `/mcp`, used by `scripts/chat_ollama.py` |
 
-A implantação pública usa `REQUIRE_API_KEY=true`, HTTPS e um único worker. A concorrência continua configurável por `MAX_CONCURRENT` de acordo com a memória disponível.
+The public deployment uses `REQUIRE_API_KEY=true`, HTTPS and a single worker. Concurrency remains configurable through `MAX_CONCURRENT` according to the available memory.
 
-## Organização
+## Project layout
 
 ```text
 app/
-  api.py              API e OpenAPI (monta o MCP em /mcp)
-  mcp_server.py       servidor MCP e tool consultar_pessoa
-  robot.py            ciclo do navegador e navegação
-  extraction.py       leitura do panorama, tabelas e benefícios
-  models.py           contrato do resultado
-  cli.py              execução em linha de comando
-tests/                testes unitários e de integração com Chromium
-workflows/            workflow n8n importável
-scripts/              diagnósticos, validação do workflow e chat_ollama.py
-docs/                 arquitetura do bônus, implantação e relatório técnico
+  api.py              API and OpenAPI (mounts MCP at /mcp)
+  mcp_server.py       MCP server and the consultar_pessoa tool
+  robot.py            browser lifecycle and navigation
+  extraction.py       reading the overview, tables and benefits
+  models.py           result contract
+  cli.py              command-line execution
+tests/                unit and Chromium integration tests
+workflows/            importable n8n workflow
+scripts/              diagnostics, workflow validation and chat_ollama.py
+docs/                 bonus architecture, deployment and technical report
 ```
 
-Dados de consultas, screenshots, tokens e variáveis locais são ignorados pelo Git por meio de `.gitignore`. A aplicação não registra o conteúdo das respostas nos logs.
+Query data, screenshots, tokens and local variables are ignored by Git through `.gitignore`. The application does not log the content of responses.**
