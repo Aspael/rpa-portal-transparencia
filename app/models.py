@@ -76,6 +76,27 @@ class Result(BaseModel):
     diagnostico: Diagnostic | None = None
 
 
+class HistoryItem(BaseModel):
+    """Resumo de uma consulta gravada no PostgreSQL."""
+    consulta_id: str
+    consultado_em: datetime
+    termo: str
+    beneficiario_programa_social: bool = False
+    modo_execucao: str
+    status: str
+    codigo: str | None = None
+    nome: str | None = None
+    cpf: str | None = None
+    nis: str | None = None
+    duracao_ms: int = 0
+    beneficios: int = 0
+
+    @field_validator("consulta_id", mode="before")
+    @classmethod
+    def as_text(cls, value) -> str:
+        return str(value)
+
+
 class ArchiveRequest(Result):
     consulta_id: str = Field(pattern=r"^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$")
     consultado_em: datetime

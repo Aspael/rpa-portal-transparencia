@@ -51,8 +51,7 @@ $('query-form').addEventListener('submit', async event => {
   $('progress').hidden = false; $('progress').textContent = 'Consultando o portal e preparando a evidência…';
   setStatus('Em andamento');
   try {
-    const headers = {'Content-Type': 'application/json'};
-    if ($('api-key').value) headers['X-API-Key'] = $('api-key').value;
+    const headers = {'Content-Type': 'application/json', ...authHeaders()};
     const response = await fetch('/consultas', {method: 'POST', headers, body: JSON.stringify({termo: $('term').value, beneficiario_programa_social: $('social').checked})});
     const data = await response.json();
     if (!data.consulta_id) {
@@ -65,16 +64,81 @@ $('query-form').addEventListener('submit', async event => {
     $('empty').querySelector('p').textContent = error.message;
   } finally {
     busy = false; $('submit').disabled = false; $('progress').hidden = true;
+    loadHistory();
   }
 });
+
+function authHeaders() {
+  return $('api-key').value ? {'X-API-Key': $('api-key').value} : {};
+}
+
+async function loadHistory() {
+  const params = new URLSearchParams({limite: 20});
+  if ($('history-search').value.trim()) params.set('busca', $('history-search').value.trim());
+  $('history-refresh').disabled = true;
+  try {
+    const response = await fetch(`/consultas?${params}`, {headers: authHeaders()});
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(response.status === 401 ? 'Informe a chave em “Chave de acesso da API” para ver o histórico.' : data.mensagem || 'Não foi possível carregar o histórico.');
+    }
+    $('history-list').replaceChildren(...data.map(historyRow));
+    $('history-status').hidden = data.length > 0;
+    $('history-status').textContent = params.has('busca') ? 'Nenhuma consulta encontrada para esse filtro.' : 'Nenhuma consulta gravada ainda.';
+  } catch (error) {
+    $('history-list').replaceChildren();
+    $('history-status').hidden = false;
+    $('history-status').textContent = error.message === 'Failed to fetch' ? 'Não foi possível carregar o histórico.' : error.message;
+  } finally {
+    $('history-refresh').disabled = false;
+  }
+}
+
+function historyRow(item) {
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = 'history-item'; button.dataset.id = item.consulta_id;
+  if (currentResult?.consulta_id === item.consulta_id) button.classList.add('active');
+  const when = document.createElement('time'); when.dateTime = item.consultado_em;
+  when.textContent = new Date(item.consultado_em).toLocaleString('pt-BR', {dateStyle: 'short', timeStyle: 'short'});
+  const who = document.createElement('strong'); who.textContent = item.nome || item.termo;
+  const details = document.createElement('small');
+  details.textContent = `${{api_oficial: 'API oficial', assistido: 'Assistido'}[item.modo_execucao] || 'Robô'} · ${item.beneficios} benefício(s)`;
+  const state = document.createElement('span'); state.className = `badge ${item.status}`;
+  state.textContent = {sucesso: 'Concluída', parcial: 'Parcial', erro: 'Falha'}[item.status] || item.status;
+  button.append(when, who, details, state);
+  button.addEventListener('click', () => openHistory(item.consulta_id));
+  const row = document.createElement('li'); row.append(button);
+  return row;
+}
+
+async function openHistory(id) {
+  if (busy) return;
+  busy = true; $('submit').disabled = true;
+  try {
+    const response = await fetch(`/consultas/${encodeURIComponent(id)}`, {headers: authHeaders()});
+    const data = await response.json();
+    if (!response.ok || !data.consulta_id) throw new Error(data.mensagem || data.detail || 'Não foi possível abrir a consulta.');
+    $('empty').hidden = true;
+    render(data);
+    for (const button of document.querySelectorAll('.history-item')) button.classList.toggle('active', button.dataset.id === id);
+    $('result-title').scrollIntoView({behavior: 'smooth', block: 'start'});
+  } catch (error) {
+    $('history-status').hidden = false; $('history-status').textContent = error.message;
+  } finally {
+    busy = false; $('submit').disabled = false;
+  }
+}
+
+$('history-form').addEventListener('submit', event => { event.preventDefault(); loadHistory(); });
+$('api-key').addEventListener('change', loadHistory);
+loadHistory();
 
 $('export').addEventListener('click', async () => {
   if (!currentResult || busy) return;
   busy = true; $('export').disabled = true; $('submit').disabled = true;
   $('export-status').hidden = false; $('export-status').textContent = 'Salvando o JSON no Drive e o registro no Sheets…';
   try {
-    const headers = {'Content-Type': 'application/json'};
-    if ($('api-key').value) headers['X-API-Key'] = $('api-key').value;
+    const headers = {'Content-Type': 'application/json', ...authHeaders()};
     const response = await fetch('/integracoes/google/arquivar', {method: 'POST', headers, body: JSON.stringify(currentResult)});
     const data = await response.json();
     if (!response.ok) throw new Error(data.mensagem || 'Não foi possível exportar. Confira a chave da API e a configuração Google.');

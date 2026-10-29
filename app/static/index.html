@@ -39,6 +39,16 @@
       </div>
     </section>
   </div>
+  <section class="card history-card" aria-labelledby="history-title">
+    <div class="section-title"><span class="step">03</span><h2 id="history-title">Consultas anteriores</h2><span class="badge">PostgreSQL</span></div>
+    <form id="history-form" class="history-filter">
+      <label for="history-search" class="sr-only">Filtrar histórico</label>
+      <input id="history-search" type="search" placeholder="Filtrar por nome, CPF ou NIS" maxlength="160" autocomplete="off">
+      <button id="history-refresh" type="submit" class="secondary">Atualizar</button>
+    </form>
+    <p id="history-status" role="status" aria-live="polite">Carregando o histórico…</p>
+    <ul id="history-list"></ul>
+  </section>
   <footer><span>Python + Playwright · Evidências rastreáveis</span><span>JSON / PNG / OpenAPI</span></footer>
 </main>
 </body></html>

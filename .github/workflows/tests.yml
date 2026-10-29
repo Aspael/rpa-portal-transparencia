@@ -3,6 +3,22 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: observa
+          POSTGRES_PASSWORD: observa
+          POSTGRES_DB: observa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U observa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://observa:observa@localhost:5432/observa
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

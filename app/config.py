@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     portal_api_key: SecretStr | None = None
     portal_api_url: str = "https://api.portaldatransparencia.gov.br/api-de-dados"
     portal_api_max_rpm: int = Field(default=80, ge=1, le=300)
+    # Histórico no PostgreSQL: vazio desativa a gravação das consultas.
+    database_url: SecretStr | None = None
     google_drive_folder_id: str = ""
     google_spreadsheet_id: str = ""
     google_sheet_tab: str = "Consultas"

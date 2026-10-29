@@ -19,6 +19,7 @@ services:
       GOOGLE_DRIVE_FOLDER_ID: "${GOOGLE_DRIVE_FOLDER_ID:-}"
       GOOGLE_SPREADSHEET_ID: "${GOOGLE_SPREADSHEET_ID:-}"
       EXPORT_STATE_DIR: /app/outputs/export-state
+      DATABASE_URL: "${DATABASE_URL:-}"
     volumes:
       - export-state:/app/outputs
     shm_size: 1gb
