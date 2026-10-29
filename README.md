@@ -1,4 +1,3 @@
-**# RPA — Portal da Transparência
 
 > **Before you start: the two keys in `.env`**
 >
