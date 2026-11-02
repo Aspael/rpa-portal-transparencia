@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 class Query(BaseModel):
     termo: str = Field(min_length=2, max_length=160, description="Nome, CPF ou NIS")
     beneficiario_programa_social: bool = False
+    atualizar: bool = Field(False, description="Ignora o histórico do PostgreSQL e consulta o portal de novo")
 
     @field_validator("termo")
     @classmethod
@@ -63,6 +64,8 @@ class Diagnostic(BaseModel):
 
 class Result(BaseModel):
     modo_execucao: Literal["autonomo", "assistido", "api_oficial"] = "autonomo"
+    # "historico": resultado lido do PostgreSQL, sem nova consulta ao portal.
+    origem: Literal["portal", "historico"] = "portal"
     consulta_id: str = Field(default_factory=lambda: str(uuid4()))
     consultado_em: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: Literal["sucesso", "parcial", "erro"] = "erro"

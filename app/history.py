@@ -1,97 +1,130 @@
-"""Histórico de consultas no PostgreSQL (opcional, ativado por DATABASE_URL)."""
+"""Histórico de consultas no PostgreSQL com SQLAlchemy (ORM), ativado por DATABASE_URL.
+
+Só consultas com sucesso são gravadas; uma nova consulta pelo mesmo termo
+reaproveita o resultado gravado enquanto ele estiver dentro de HISTORY_CACHE_HOURS.
+"""
 import asyncio
+from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID
 
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
-from psycopg_pool import AsyncConnectionPool
+from sqlalchemy import Boolean, DateTime, Integer, Text, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PgUUID, insert
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.config import Settings
 from app.models import HistoryItem, Query, Result
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS consultas (
-    consulta_id uuid PRIMARY KEY,
-    consultado_em timestamptz NOT NULL,
-    termo text NOT NULL,
-    beneficiario_programa_social boolean NOT NULL DEFAULT false,
-    modo_execucao text NOT NULL,
-    status text NOT NULL,
-    codigo text,
-    nome text,
-    cpf text,
-    nis text,
-    duracao_ms integer NOT NULL DEFAULT 0,
-    resultado jsonb NOT NULL
-);
-CREATE INDEX IF NOT EXISTS consultas_consultado_em_idx ON consultas (consultado_em DESC);
-"""
 
-INSERT = """
-INSERT INTO consultas (consulta_id, consultado_em, termo, beneficiario_programa_social, modo_execucao,
-                       status, codigo, nome, cpf, nis, duracao_ms, resultado)
-VALUES (%(consulta_id)s, %(consultado_em)s, %(termo)s, %(social)s, %(modo_execucao)s,
-        %(status)s, %(codigo)s, %(nome)s, %(cpf)s, %(nis)s, %(duracao_ms)s, %(resultado)s)
-ON CONFLICT (consulta_id) DO NOTHING
-"""
+class Base(DeclarativeBase):
+    pass
 
-LIST = """
-SELECT consulta_id, consultado_em, termo, beneficiario_programa_social, modo_execucao, status, codigo,
-       nome, cpf, nis, duracao_ms, jsonb_array_length(resultado->'beneficios') AS beneficios
-FROM consultas
-WHERE %(busca)s::text IS NULL OR termo ILIKE %(busca)s OR nome ILIKE %(busca)s
-ORDER BY consultado_em DESC
-LIMIT %(limite)s
-"""
+
+class Consulta(Base):
+    """Uma consulta bem-sucedida: colunas para filtro e o JSON completo em `resultado`."""
+    __tablename__ = "consultas"
+
+    consulta_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    consultado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    termo: Mapped[str] = mapped_column(Text, index=True)
+    beneficiario_programa_social: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    modo_execucao: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    codigo: Mapped[str | None] = mapped_column(Text)
+    nome: Mapped[str | None] = mapped_column(Text)
+    cpf: Mapped[str | None] = mapped_column(Text)
+    nis: Mapped[str | None] = mapped_column(Text)
+    duracao_ms: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    resultado: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
+def async_url(url: str) -> str:
+    # postgresql://... vira postgresql+psycopg://... (driver psycopg 3, assíncrono).
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
 
 
 class History:
-    """Grava cada resultado e devolve as consultas anteriores."""
+    """Grava resultados com sucesso e devolve as consultas anteriores."""
 
     def __init__(self, settings: Settings):
-        self.pool = AsyncConnectionPool(settings.database_url.get_secret_value(), min_size=1, max_size=5,
-                                        timeout=5, open=False, kwargs={"row_factory": dict_row})
+        self.cache_hours = settings.history_cache_hours
+        self.engine: AsyncEngine = create_async_engine(
+            async_url(settings.database_url.get_secret_value()),
+            pool_size=5, max_overflow=0, pool_timeout=5, pool_pre_ping=True,
+            connect_args={"connect_timeout": 5},
+        )
+        self.session = async_sessionmaker(self.engine, expire_on_commit=False)
         self._ready = False
         self._lock = asyncio.Lock()
 
     async def start(self):
-        # Não espera o banco: a API sobe mesmo com o Postgres indisponível,
+        # Não conecta agora: a API sobe mesmo com o Postgres indisponível,
         # e a tabela é criada no primeiro uso bem-sucedido.
-        await self.pool.open(wait=False)
+        pass
 
     async def close(self):
-        await self.pool.close()
+        await self.engine.dispose()
 
     async def _ensure_schema(self):
         if self._ready:
             return
         async with self._lock:
             if not self._ready:
-                async with self.pool.connection() as conn:
-                    await conn.execute(SCHEMA)
+                async with self.engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
                 self._ready = True
 
     async def save(self, query: Query, result: Result):
+        """INSERT da consulta (a API chama só para status "sucesso")."""
         await self._ensure_schema()
         person = result.pessoa
-        async with self.pool.connection() as conn:
-            await conn.execute(INSERT, {
-                "consulta_id": result.consulta_id, "consultado_em": result.consultado_em,
-                "termo": query.termo, "social": query.beneficiario_programa_social,
-                "modo_execucao": result.modo_execucao, "status": result.status, "codigo": result.codigo,
-                "nome": person and person.nome, "cpf": person and person.cpf, "nis": person and person.nis,
-                "duracao_ms": result.duracao_ms, "resultado": Jsonb(result.model_dump(mode="json")),
-            })
+        values = {
+            "consulta_id": UUID(result.consulta_id), "consultado_em": result.consultado_em,
+            "termo": query.termo, "beneficiario_programa_social": query.beneficiario_programa_social,
+            "modo_execucao": result.modo_execucao, "status": result.status, "codigo": result.codigo,
+            "nome": person and person.nome, "cpf": person and person.cpf, "nis": person and person.nis,
+            "duracao_ms": result.duracao_ms, "resultado": result.model_dump(mode="json", exclude={"origem"}),
+        }
+        async with self.session.begin() as session:
+            # Repetir o mesmo consulta_id não duplica a linha.
+            await session.execute(insert(Consulta).values(values).on_conflict_do_nothing(index_elements=["consulta_id"]))
+
+    async def find(self, query: Query) -> Result | None:
+        """SELECT do resultado mais recente para o mesmo termo, se ainda estiver no prazo."""
+        if self.cache_hours <= 0:
+            return None
+        await self._ensure_schema()
+        since = datetime.now(timezone.utc) - timedelta(hours=self.cache_hours)
+        stmt = (select(Consulta.resultado)
+                .where(func.lower(Consulta.termo) == query.termo.lower(),
+                       Consulta.beneficiario_programa_social == query.beneficiario_programa_social,
+                       Consulta.status == "sucesso", Consulta.consultado_em >= since)
+                .order_by(Consulta.consultado_em.desc()).limit(1))
+        async with self.session() as session:
+            data = await session.scalar(stmt)
+        return Result.model_validate(data).model_copy(update={"origem": "historico"}) if data else None
 
     async def list(self, limit: int = 20, search: str | None = None) -> list[HistoryItem]:
         await self._ensure_schema()
-        async with self.pool.connection() as conn:
-            cursor = await conn.execute(LIST, {"busca": f"%{search}%" if search else None, "limite": limit})
-            return [HistoryItem(**row) for row in await cursor.fetchall()]
+        stmt = select(
+            Consulta.consulta_id, Consulta.consultado_em, Consulta.termo, Consulta.beneficiario_programa_social,
+            Consulta.modo_execucao, Consulta.status, Consulta.codigo, Consulta.nome, Consulta.cpf, Consulta.nis,
+            Consulta.duracao_ms,
+            func.coalesce(func.jsonb_array_length(Consulta.resultado["beneficios"]), 0).label("beneficios"),
+        ).order_by(Consulta.consultado_em.desc()).limit(limit)
+        if search:
+            pattern = f"%{search}%"
+            stmt = stmt.where(or_(Consulta.termo.ilike(pattern), Consulta.nome.ilike(pattern)))
+        async with self.session() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return [HistoryItem(**row) for row in rows]
 
-    async def get(self, consulta_id: UUID) -> Result | None:
+    async def get(self, consulta_id: UUID | str) -> Result | None:
         await self._ensure_schema()
-        async with self.pool.connection() as conn:
-            cursor = await conn.execute("SELECT resultado FROM consultas WHERE consulta_id = %s", (consulta_id,))
-            row = await cursor.fetchone()
-        return Result.model_validate(row["resultado"]) if row else None
+        async with self.session() as session:
+            row = await session.get(Consulta, UUID(str(consulta_id)))
+        return Result.model_validate(row.resultado) if row else None

@@ -29,7 +29,7 @@
 | Modelo local | Ollama como LLM local, conectado ao robô pelo MCP |
 | Hiperautomação | n8n com nós oficiais Google Drive e Google Sheets |
 | Implantação | Docker em VPS, disponível por HTTPS em domínio neutro |
-| Histórico | PostgreSQL com todas as consultas, listadas e reabertas pelo front |
+| Histórico | PostgreSQL via SQLAlchemy (ORM): grava consultas com sucesso e as reaproveita na próxima busca; pgAdmin para inspecionar |
 | Testes | 39 testes automatizados e validação estrutural do workflow n8n |
 
 Links da aplicação:
@@ -118,7 +118,17 @@ curl -X POST http://127.0.0.1:8000/consultas \
 
 ### Histórico no PostgreSQL
 
-Com `DATABASE_URL` definido, cada resposta de `POST /consultas` (sucesso, parcial ou erro) é gravada na tabela `consultas`, criada automaticamente no primeiro uso. O JSON completo fica na coluna `resultado` (`jsonb`), e termo, nome, CPF, NIS, status e data ficam em colunas próprias para filtro. Se o banco cair, a consulta continua respondendo normalmente e a falha aparece só no log.
+Com `DATABASE_URL` definido, o histórico usa SQLAlchemy (ORM assíncrono, modelo `Consulta` em `app/history.py`) sobre a tabela `consultas`, criada automaticamente no primeiro uso. O JSON completo fica na coluna `resultado` (`jsonb`), e termo, nome, CPF, NIS, status e data ficam em colunas próprias para filtro.
+
+Fluxo de `POST /consultas`:
+
+1. **SELECT**: procura no PostgreSQL um resultado com sucesso para o mesmo termo (sem diferenciar maiúsculas) e o mesmo filtro de programa social, gravado nas últimas `HISTORY_CACHE_HOURS` horas (padrão 24). Se achar, devolve esse resultado com `"origem": "historico"`, sem ir ao portal.
+2. Senão, consulta o portal (`"origem": "portal"`).
+3. **INSERT**: só resultados com `status: "sucesso"` são gravados; parcial e erro não entram no histórico, e a próxima tentativa volta ao portal.
+
+Envie `"atualizar": true` no corpo para ignorar o histórico e forçar nova consulta; `HISTORY_CACHE_HOURS=0` desativa o reaproveitamento. Se o banco cair, a consulta continua respondendo normalmente e a falha aparece só no log.
+
+O pgAdmin (`http://localhost:5050`) sobe junto, na rede `rpa-network`, com o servidor `observa` (`postgres:5432`) já cadastrado; na primeira conexão ele pede a senha `POSTGRES_PASSWORD` (padrão `observa`). A porta só abre em `127.0.0.1`, por isso ele roda sem tela de login.
 
 | Rota | O que faz |
 |---|---|
@@ -202,7 +212,7 @@ Não é preciso criar `.venv` nem instalar dependências: o `run.py` usa só a b
 | `python run.py` | API e n8n em contêineres |
 | `python run.py --no-build` | Sobe sem reconstruir a imagem |
 | `python run.py --no-browser` | Não abre o navegador |
-| `python run.py --local` | API no Python local; n8n e PostgreSQL em contêiner |
+| `python run.py --local` | API no Python local; n8n, PostgreSQL e pgAdmin em contêiner |
 | `python run.py down` | Remove os contêineres (os volumes são mantidos) |
 
 O modo `--local` serve para desenvolver sem reconstruir a imagem a cada alteração. Ele exige o ambiente da seção [Executar localmente](#executar-localmente) com o `.venv` ativo, instala o Chromium em `.browsers` se faltar e aponta o n8n para `http://host.docker.internal:8000`. Se o n8n não alcançar a API, use `python run.py --local --host 0.0.0.0` com `REQUIRE_API_KEY=true`, porque assim a API fica visível na rede local.
@@ -217,13 +227,14 @@ docker compose up --build
 
 A imagem inclui Python, Chromium e as dependências de sistema do Playwright.
 
-O mesmo `compose.yaml` sobe três contêineres na rede `rpa-network`:
+O mesmo `compose.yaml` sobe quatro contêineres na rede `rpa-network`:
 
 | Serviço | Endereço no computador | Endereço dentro da rede |
 |---|---|---|
 | `api` | `http://127.0.0.1:8000` | `http://api:8000` |
 | `n8n` | `http://localhost:5678` | `http://n8n:5678` |
 | `postgres` | `127.0.0.1:5432` | `postgres:5432` |
+| `pgadmin` | `http://localhost:5050` | `http://pgadmin:80` |
 
 O PostgreSQL guarda o [histórico das consultas](#histórico-no-postgresql) no volume `postgres-data`; usuário, senha e banco vêm de `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` (padrão `observa`).
 

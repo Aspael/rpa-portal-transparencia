@@ -22,6 +22,7 @@ services:
       EXPORT_STATE_DIR: /app/outputs/export-state
       # Histórico das consultas no serviço postgres abaixo.
       DATABASE_URL: "postgresql://${POSTGRES_USER:-observa}:${POSTGRES_PASSWORD:-observa}@postgres:5432/${POSTGRES_DB:-observa}"
+      HISTORY_CACHE_HOURS: "${HISTORY_CACHE_HOURS:-24}"
     volumes:
       - export-state:/app/outputs
     shm_size: 1gb
@@ -53,6 +54,33 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # pgAdmin para inspecionar o histórico: http://localhost:5050. O servidor
+  # "observa" (postgres:5432 pela rede rpa-network) já vem cadastrado; a senha
+  # pedida na primeira conexão é POSTGRES_PASSWORD.
+  pgadmin:
+    image: "dpage/pgadmin4:${PGADMIN_VERSION:-9.19}"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PGADMIN_HOST_PORT:-5050}:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${PGADMIN_EMAIL:-admin@example.com}"
+      PGADMIN_DEFAULT_PASSWORD: "${PGADMIN_PASSWORD:-observa}"
+      # Modo desktop: sem tela de login, aceitável porque a porta só abre em 127.0.0.1.
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     logging:
       driver: json-file
       options:
@@ -99,6 +127,7 @@ volumes:
   export-state:
   n8n-data:
   postgres-data:
+  pgadmin-data:
 
 # Rede bridge com nome fixo: outros contêineres (n8n, Ollama...) podem entrar
 # nela como external e acessar a API em http://api:8000.

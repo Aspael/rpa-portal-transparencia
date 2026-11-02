@@ -108,7 +108,7 @@ def up(args, settings):
             env["DATABASE_URL"] = (f"postgresql://{settings.get('POSTGRES_USER', 'observa')}:"
                                    f"{settings.get('POSTGRES_PASSWORD', 'observa')}@localhost:"
                                    f"{settings.get('POSTGRES_HOST_PORT', '5432')}/{settings.get('POSTGRES_DB', 'observa')}")
-        compose("up", "-d", "--no-deps", "postgres", "n8n", env=env)
+        compose("up", "-d", "--no-deps", "postgres", "pgadmin", "n8n", env=env)
     else:
         compose("up", "-d", *([] if args.no_build else ["--build"]), env=env)
 
@@ -120,6 +120,7 @@ def up(args, settings):
 
         print(f"\nAPI:  http://127.0.0.1:{api_port}  (Swagger em /docs)")
         print(f"n8n:  http://localhost:{n8n_port}")
+        print(f"pgAdmin: http://localhost:{settings.get('PGADMIN_HOST_PORT', '5050')}")
         print("Ctrl+C para encerrar.\n")
         if not args.no_browser:
             webbrowser.open(f"http://127.0.0.1:{api_port}")

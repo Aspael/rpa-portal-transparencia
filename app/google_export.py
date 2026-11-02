@@ -77,7 +77,8 @@ class GoogleExporter:
 
     def _export(self, result, drive, sheets):
         settings = self.settings
-        payload = result.model_dump_json(indent=2).encode("utf-8")
+        # "origem" muda quando o resultado vem do histórico; o JSON arquivado é o mesmo.
+        payload = result.model_dump_json(indent=2, exclude={"origem"}).encode("utf-8")
         digest = hashlib.sha256(payload).hexdigest()
         state_key = hashlib.sha256((settings.google_drive_folder_id + settings.google_spreadsheet_id + settings.google_sheet_tab + result.consulta_id).encode()).hexdigest()
         state_path = settings.export_state_dir / f"{state_key}.json"
