@@ -49,7 +49,7 @@ def test_ui_search_error_download_export_and_mobile():
                 await page.screenshot(path=str(output / "desktop.png"), full_page=True)
                 await page.get_by_label("Nome, CPF ou NIS", exact=True).fill("Pessoa Fictícia")
                 await page.get_by_label("Apenas beneficiários de programa social").check()
-                await page.get_by_role("button", name="Consultar portal").click()
+                await page.get_by_role("button", name="Consultar").click()
                 await expect(page.locator("#status")).to_have_text("Falha")
                 await expect(page.locator("#message")).to_have_text(result.mensagem)
                 assert submissions == [{"termo": "Pessoa Fictícia", "beneficiario_programa_social": True}]

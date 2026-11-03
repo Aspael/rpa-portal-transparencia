@@ -63,6 +63,33 @@ Each query creates a separate browser context. A semaphore limits the number of 
 
 The MCP server runs in the same process as the API and calls the same robot, so the semaphore also applies to queries made through MCP. Ollama does not speak MCP by itself: the model decides when to call the tool (tool calling) and an MCP client, which can be the `scripts/chat_ollama.py` script or an n8n agent, performs the call to `/mcp` and returns the result to the model.
 
+## Data source: local open data (default)
+
+By default (`QUERY_SOURCE=dados_abertos`) Observa **does not access the government website or API when answering a query**. It searches a local base in PostgreSQL built from the monthly open-data files of the Portal da Transparência ([download-de-dados](https://portaldatransparencia.gov.br/download-de-dados)). There is no CAPTCHA, no key and no rate limit; Playwright is not even started in this mode.
+
+Import one month of a program before querying (inside Docker, `DATABASE_URL` is already set):
+
+```bash
+docker compose exec api python -m app.importar_dados novo-bolsa-familia 202501 --uf AM
+docker compose exec api python -m app.importar_dados --listar
+```
+
+| Program (`programa`) | Content |
+|---|---|
+| `novo-bolsa-familia` | Novo Bolsa Família payments (2023 onwards) |
+| `bolsa-familia-pagamentos` | Bolsa Família payments (until 2021) |
+| `auxilio-brasil` | Auxílio Brasil payments (2021–2023) |
+| `auxilio-emergencial` | Auxílio Emergencial (2020–2021) |
+| `bpc` | Benefício de Prestação Continuada |
+
+- The ZIP is downloaded once to `DADOS_ABERTOS_DIR` and reused; `--baixar-de-novo` forces a new download. Importing the same program and month again replaces the previous rows.
+- A full month of Bolsa Família is ~360 MB zipped and ~20 million rows. Use `--uf` to keep a single state (and `--limite N` for quick tests).
+- Search by **full name** (case and accents ignored) or **NIS**. In these files the CPF is published masked (`***.123.456-**`), so a CPF only works when its middle digits match a single person; otherwise the answer is `CPF_AMBIGUO` (HTTP 422).
+- The result keeps the same contract, with `modo_execucao=dados_abertos`: one benefit per program and one page per imported month, without a screenshot. `pessoa.panorama.campos["Meses na base local"]` says which months were searched.
+- Errors: `BASE_VAZIA` (nothing imported yet), `BASE_LOCAL_DESATIVADA` (no `DATABASE_URL`), `BASE_LOCAL_INDISPONIVEL` (PostgreSQL unreachable), all HTTP 503.
+
+The robot (website) and the official Data API are still available with `QUERY_SOURCE=auto`, `api` or `site`, described below.
+
 ## Run locally
 
 Requirements: Python 3.11 or higher, and Node.js only to validate the n8n workflow. [Ollama](https://ollama.com/) is needed only if you want to use the local model.
@@ -476,7 +503,8 @@ The MCP tests (`tests/test_mcp.py`) verify that the `consultar_pessoa` tool is l
 | `REQUIRE_API_KEY` | `false` | prevents starting without a key when enabled |
 | `PORTAL_API_KEY` | empty | gov.br Data API key; with it, CPF/NIS queries use the official API instead of the website |
 | `PORTAL_API_MAX_RPM` | `80` | cap on requests per minute to the Data API (official limit: 90/min by day, 300/min overnight) |
-| `QUERY_SOURCE` | `auto` | `auto`: CPF/NIS via Data API when the key exists, name via website; `api`: never opens the website (CPF/NIS only); `site`: always the robot |
+| `QUERY_SOURCE` | `dados_abertos` | `dados_abertos`: local PostgreSQL base imported with `app.importar_dados`, never contacts the government; `auto`: CPF/NIS via Data API when the key exists, name via website; `api`: never opens the website (CPF/NIS only); `site`: always the robot |
+| `DADOS_ABERTOS_DIR` | `outputs/dados-abertos` | where the importer keeps the downloaded ZIP files |
 | `ASSISTED_MODE` | `false` | on a CAPTCHA, repeats the query in a visible window for a person to solve the verification (needs a screen) |
 | `ASSISTED_WAIT_SECONDS` | `180` | how long the assisted mode waits for the verification to be completed |
 | `MCP_ENABLED` | `true` | enables the `/mcp` endpoint |

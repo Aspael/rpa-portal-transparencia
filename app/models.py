@@ -63,7 +63,7 @@ class Diagnostic(BaseModel):
 
 
 class Result(BaseModel):
-    modo_execucao: Literal["autonomo", "assistido", "api_oficial"] = "autonomo"
+    modo_execucao: Literal["autonomo", "assistido", "api_oficial", "dados_abertos"] = "autonomo"
     # "historico": resultado lido do PostgreSQL, sem nova consulta ao portal.
     origem: Literal["portal", "historico"] = "portal"
     consulta_id: str = Field(default_factory=lambda: str(uuid4()))

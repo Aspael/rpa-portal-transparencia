@@ -12,6 +12,7 @@ from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings
+from app.dados_abertos import DadosAbertos
 from app.history import History
 from app.models import ArchiveRequest, HistoryItem, Query, Result
 from app.portal_api import PortalApi
@@ -22,23 +23,31 @@ log = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_factory=GoogleExporter,
-               portal_api_factory=PortalApi, history_factory=History) -> FastAPI:
+               portal_api_factory=PortalApi, history_factory=History, local_factory=DadosAbertos) -> FastAPI:
     settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if settings.require_api_key and not (settings.api_key and settings.api_key.get_secret_value()):
             raise RuntimeError("API_KEY é obrigatória neste ambiente")
-        robot = robot_factory(settings)
-        await robot.start()
+        local_mode = settings.query_source == "dados_abertos"
+        has_database = bool(settings.database_url and settings.database_url.get_secret_value())
+        # Com dados abertos o navegador nunca é usado, então nem é iniciado.
+        robot = None if local_mode else robot_factory(settings)
+        if robot:
+            await robot.start()
         app.state.robot = robot
         app.state.portal_api = None
         app.state.history = None
+        app.state.dados_abertos = None
         try:
-            if settings.portal_api_key and settings.portal_api_key.get_secret_value():
+            if not local_mode and settings.portal_api_key and settings.portal_api_key.get_secret_value():
                 app.state.portal_api = portal_api_factory(settings)
                 await app.state.portal_api.start()
-            if settings.database_url and settings.database_url.get_secret_value():
+            if local_mode and has_database:
+                app.state.dados_abertos = local_factory(settings)
+                await app.state.dados_abertos.start()
+            if has_database:
                 app.state.history = history_factory(settings)
                 await app.state.history.start()
             yield
@@ -46,10 +55,13 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
             try:
                 if app.state.history:
                     await app.state.history.close()
+                if app.state.dados_abertos:
+                    await app.state.dados_abertos.close()
                 if app.state.portal_api:
                     await app.state.portal_api.close()
             finally:
-                await robot.close()
+                if robot:
+                    await robot.close()
 
     app = FastAPI(title="Portal da Transparência — RPA", version="1.0.0", lifespan=lifespan)
     static = Path(__file__).parent / "static"
@@ -118,7 +130,9 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
         status = 200
         if result.status == "erro":
             status = {"NAO_ENCONTRADO": 404, "TEMPO_ESGOTADO": 504, "LIMITE_API_EXCEDIDO": 429,
-                      "BUSCA_POR_NOME_SEM_API": 422, "CHAVE_PORTAL_AUSENTE": 503}.get(result.codigo, 502)
+                      "BUSCA_POR_NOME_SEM_API": 422, "CHAVE_PORTAL_AUSENTE": 503, "CPF_AMBIGUO": 422,
+                      "BASE_VAZIA": 503, "BASE_LOCAL_DESATIVADA": 503,
+                      "BASE_LOCAL_INDISPONIVEL": 503}.get(result.codigo, 502)
         return JSONResponse(result.model_dump(mode="json"), status_code=status, headers={"Cache-Control": "no-store"})
 
     class Refusal:
@@ -127,9 +141,13 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
             self.code, self.message = code, message
 
         async def query(self, query: Query) -> Result:
-            return Result(modo_execucao="api_oficial", codigo=self.code, mensagem=self.message)
+            mode = "dados_abertos" if settings.query_source == "dados_abertos" else "api_oficial"
+            return Result(modo_execucao=mode, codigo=self.code, mensagem=self.message)
 
     def pick_source(query: Query, request: Request):
+        if settings.query_source == "dados_abertos":
+            return request.app.state.dados_abertos or Refusal(
+                "BASE_LOCAL_DESATIVADA", "QUERY_SOURCE=dados_abertos exige DATABASE_URL (PostgreSQL com os dados importados).")
         # CPF/NIS com PORTAL_API_KEY vai pela API de Dados oficial, sem CAPTCHA.
         # A API não busca por nome: em "auto" o nome vai ao site; em "api", é recusado.
         portal_api, robot = request.app.state.portal_api, request.app.state.robot

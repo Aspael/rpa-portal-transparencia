@@ -125,7 +125,7 @@ class StubPortalApi(StubRobot):
 
 
 def test_api_routes_documents_to_official_api():
-    with TestClient(create_app(settings(), StubRobot, portal_api_factory=StubPortalApi)) as client:
+    with TestClient(create_app(settings(query_source="auto"), StubRobot, portal_api_factory=StubPortalApi)) as client:
         response = client.post("/consultas", json={"termo": "123.456.789-01"})
         assert response.status_code == 429 and response.json()["modo_execucao"] == "api_oficial"
         response = client.post("/consultas", json={"termo": "Maria"})
@@ -133,5 +133,5 @@ def test_api_routes_documents_to_official_api():
 
 
 def test_without_key_documents_use_robot():
-    with TestClient(create_app(Settings(_env_file=None), StubRobot, portal_api_factory=StubPortalApi)) as client:
+    with TestClient(create_app(Settings(_env_file=None, query_source="auto"), StubRobot, portal_api_factory=StubPortalApi)) as client:
         assert client.post("/consultas", json={"termo": CPF}).json()["codigo"] == "PORTAL_BLOQUEADO"

@@ -22,7 +22,7 @@ class StubRobot:
 
 
 def test_validation_auth_and_status():
-    with TestClient(create_app(Settings(api_key="test-key"), StubRobot)) as client:
+    with TestClient(create_app(Settings(query_source="site", api_key="test-key"), StubRobot)) as client:
         assert client.get("/health").status_code == 200
         assert client.post("/consultas", json={"termo": "Teste"}).status_code == 401
         headers = {"X-API-Key": "test-key"}
@@ -44,9 +44,9 @@ def test_validation_auth_and_status():
 
 
 def test_front_uses_env_api_key_unless_disabled():
-    with TestClient(create_app(Settings(api_key="env-key"), StubRobot)) as client:
+    with TestClient(create_app(Settings(query_source="site", api_key="env-key"), StubRobot)) as client:
         assert '<meta name="api-key" content="env-key">' in client.get("/").text
-    with TestClient(create_app(Settings(api_key="env-key", front_api_key_from_env=False), StubRobot)) as client:
+    with TestClient(create_app(Settings(query_source="site", api_key="env-key", front_api_key_from_env=False), StubRobot)) as client:
         page = client.get("/").text
         assert '<meta name="api-key" content="">' in page and "env-key" not in page
 
@@ -76,7 +76,7 @@ def test_query_source_api_never_uses_the_website():
 
 def test_deployment_cannot_start_without_required_key():
     with pytest.raises(RuntimeError, match="API_KEY"):
-        with TestClient(create_app(Settings(require_api_key=True, api_key=None), StubRobot)):
+        with TestClient(create_app(Settings(query_source="site", require_api_key=True, api_key=None), StubRobot)):
             pass
 
 
@@ -120,7 +120,7 @@ class SuccessRobot(StubRobot):
 
 
 def test_history_saves_lists_and_reopens_queries():
-    settings = Settings(api_key="test-key", database_url="postgresql://stub")
+    settings = Settings(query_source="site", api_key="test-key", database_url="postgresql://stub")
     with TestClient(create_app(settings, SuccessRobot, history_factory=StubHistory)) as client:
         headers = {"X-API-Key": "test-key"}
         assert client.get("/consultas").status_code == 401
@@ -138,7 +138,7 @@ def test_history_saves_lists_and_reopens_queries():
 
 
 def test_success_is_inserted_and_reused_from_history():
-    settings = Settings(database_url="postgresql://stub")
+    settings = Settings(query_source="site", database_url="postgresql://stub")
     with TestClient(create_app(settings, SuccessRobot, history_factory=StubHistory)) as client:
         robot, store = client.app.state.robot, client.app.state.history
         first = client.post("/consultas", json={"termo": "Maria"}).json()
@@ -163,7 +163,7 @@ def test_success_is_inserted_and_reused_from_history():
 
 
 def test_history_disabled_and_database_failure():
-    with TestClient(create_app(Settings(database_url=None), StubRobot)) as client:
+    with TestClient(create_app(Settings(query_source="site", database_url=None), StubRobot)) as client:
         response = client.get("/consultas")
         assert response.status_code == 503
         assert response.json()["codigo"] == "HISTORICO_DESATIVADO"
@@ -178,7 +178,7 @@ def test_history_disabled_and_database_failure():
         async def list(self, limit, search=None):
             raise ConnectionError("banco fora do ar")
 
-    with TestClient(create_app(Settings(database_url="postgresql://stub"), StubRobot, history_factory=BrokenHistory)) as client:
+    with TestClient(create_app(Settings(query_source="site", database_url="postgresql://stub"), StubRobot, history_factory=BrokenHistory)) as client:
         # A consulta continua respondendo mesmo sem banco.
         assert client.post("/consultas", json={"termo": "Teste"}).json()["codigo"] == "NAO_ENCONTRADO"
         assert client.get("/consultas").json()["codigo"] == "HISTORICO_INDISPONIVEL"

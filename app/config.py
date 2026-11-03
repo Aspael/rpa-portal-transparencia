@@ -29,9 +29,13 @@ class Settings(BaseSettings):
     portal_api_key: SecretStr | None = None
     portal_api_url: str = "https://api.portaldatransparencia.gov.br/api-de-dados"
     portal_api_max_rpm: int = Field(default=80, ge=1, le=300)
-    # De onde vêm as consultas: "auto" usa a API para CPF/NIS (com chave) e o site
-    # para nome; "api" nunca abre o site (sem CAPTCHA, só CPF/NIS); "site" sempre usa o robô.
-    query_source: Literal["auto", "api", "site"] = "auto"
+    # De onde vêm as consultas: "dados_abertos" consulta só a base local no PostgreSQL
+    # (arquivos importados com python -m app.importar_dados; não acessa o governo na consulta);
+    # "auto" usa a API para CPF/NIS (com chave) e o site para nome; "api" nunca abre o site
+    # (sem CAPTCHA, só CPF/NIS); "site" sempre usa o robô.
+    query_source: Literal["dados_abertos", "auto", "api", "site"] = "dados_abertos"
+    # Onde ficam os ZIPs baixados pelo importador de dados abertos.
+    dados_abertos_dir: Path = Path("outputs/dados-abertos")
     # Histórico no PostgreSQL: vazio desativa a gravação das consultas.
     database_url: SecretStr | None = None
     # Horas em que um resultado com sucesso do histórico é reaproveitado; 0 sempre consulta o portal.

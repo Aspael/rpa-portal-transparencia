@@ -16,7 +16,8 @@ services:
       REQUIRE_API_KEY: "${REQUIRE_API_KEY:-false}"
       FRONT_API_KEY_FROM_ENV: "${FRONT_API_KEY_FROM_ENV:-true}"
       PORTAL_API_KEY: "${PORTAL_API_KEY:-}"
-      QUERY_SOURCE: "${QUERY_SOURCE:-auto}"
+      QUERY_SOURCE: "${QUERY_SOURCE:-dados_abertos}"
+      DADOS_ABERTOS_DIR: /app/outputs/dados-abertos
       ASSISTED_MODE: "${ASSISTED_MODE:-false}"
       ASSISTED_WAIT_SECONDS: "${ASSISTED_WAIT_SECONDS:-180}"
       PORTAL_API_MAX_RPM: "${PORTAL_API_MAX_RPM:-80}"
