@@ -52,6 +52,10 @@ $('query-form').addEventListener('submit', async event => {
   $('submit').disabled = true; $('result').hidden = true; $('empty').hidden = true;
   $('progress').hidden = false; $('progress').textContent = 'Consultando o portal e preparando a evidência…';
   setStatus('Em andamento');
+  // Modo assistido: se o portal pedir verificação, uma janela do Chromium abre no computador do servidor.
+  const assistedHint = assistedMode && setTimeout(() => {
+    $('progress').textContent = 'Ainda consultando… Se o portal pedir verificação humana, uma janela do Chromium vai abrir: resolva a verificação nela e a consulta continua sozinha.';
+  }, 8000);
   try {
     const headers = {'Content-Type': 'application/json', ...authHeaders()};
     const response = await fetch('/consultas', {method: 'POST', headers, body: JSON.stringify({termo: $('term').value, beneficiario_programa_social: $('social').checked})});
@@ -65,6 +69,7 @@ $('query-form').addEventListener('submit', async event => {
     $('empty').querySelector('h3').textContent = 'Não foi possível concluir';
     $('empty').querySelector('p').textContent = error.message;
   } finally {
+    clearTimeout(assistedHint);
     busy = false; $('submit').disabled = false; $('progress').hidden = true;
     loadHistory();
   }
@@ -72,6 +77,7 @@ $('query-form').addEventListener('submit', async event => {
 
 // Prioridade: campo do front; senão, a chave do .env que o servidor embute na página.
 const envApiKey = document.querySelector('meta[name="api-key"]')?.content || '';
+const assistedMode = document.querySelector('meta[name="assisted-mode"]')?.content === 'true';
 function authHeaders() {
   const key = $('api-key').value.trim() || envApiKey;
   return key ? {'X-API-Key': key} : {};

@@ -340,7 +340,7 @@ docker compose exec api sh -c 'test -n "$PORTAL_API_KEY" && echo definida || ech
 | CPF returns `PORTAL_BLOQUEADO` (502) | `PORTAL_API_KEY` empty or not loaded | fill it in, restart and check `modo_execucao` |
 | `CHAVE_PORTAL_INVALIDA` (502) | the government rejected the key | test it with the `curl` above; check that it was copied in full |
 | `LIMITE_API_EXCEDIDO` (429) | the key's per-minute limit was reached | wait a minute; lower `PORTAL_API_MAX_RPM` and `MAX_CONCURRENT`; run large loads overnight |
-| name returns `PORTAL_BLOQUEADO` | search by name uses the website, which has a CAPTCHA | query by CPF/NIS |
+| name returns `PORTAL_BLOQUEADO` | search by name uses the website, which has a CAPTCHA | query by CPF/NIS, or enable the [assisted mode](#assisted-mode-a-person-solves-the-verification) |
 
 ## Result contract
 
@@ -365,6 +365,17 @@ HTTP 200 represents a complete or partial collection; the consumer must check `s
 The Portal da Transparência may present an AWS WAF human verification depending on network, IP and session. The assignment requires headless automation but does not require solving a CAPTCHA.
 
 When the verification appears, the robot does not try to bypass it. It ends the query with `status=erro`, `codigo=PORTAL_BLOQUEADO` and a diagnostic capture. This handling avoids a silent timeout and prevents incomplete data from being presented as a valid collection.
+
+### Assisted mode: a person solves the verification
+
+With `ASSISTED_MODE=true`, a blocked query is repeated in a **visible** Chromium window. When the verification appears, the robot brings the window to the front and waits up to `ASSISTED_WAIT_SECONDS` (default 180) for a person to complete it; it then continues the same query on its own. The robot never solves the CAPTCHA itself. The result comes out with `modo_execucao=assistido`; if the verification isn't completed in time, it ends with `PORTAL_BLOQUEADO` as before. Only one assisted window runs at a time.
+
+It needs a screen on the machine running the API:
+
+- **WSL + Docker** (WSLg): `docker compose -f compose.yaml -f compose.assisted.yaml up -d`. The override mounts the WSLg X11 socket and sets `ASSISTED_MODE=true`; the window opens on the Windows desktop.
+- **Python local**: `ASSISTED_MODE=true` in `.env` and `python run.py --local`.
+
+Without a screen (plain Docker, VPS, Render), the mode stays off and the message of `PORTAL_BLOQUEADO` says why. While a query runs, the front end tells the user to look for the window.
 
 ### Official alternative: Data API
 
@@ -466,6 +477,8 @@ The MCP tests (`tests/test_mcp.py`) verify that the `consultar_pessoa` tool is l
 | `PORTAL_API_KEY` | empty | gov.br Data API key; with it, CPF/NIS queries use the official API instead of the website |
 | `PORTAL_API_MAX_RPM` | `80` | cap on requests per minute to the Data API (official limit: 90/min by day, 300/min overnight) |
 | `QUERY_SOURCE` | `auto` | `auto`: CPF/NIS via Data API when the key exists, name via website; `api`: never opens the website (CPF/NIS only); `site`: always the robot |
+| `ASSISTED_MODE` | `false` | on a CAPTCHA, repeats the query in a visible window for a person to solve the verification (needs a screen) |
+| `ASSISTED_WAIT_SECONDS` | `180` | how long the assisted mode waits for the verification to be completed |
 | `MCP_ENABLED` | `true` | enables the `/mcp` endpoint |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama address, used by `scripts/chat_ollama.py` |
 | `OLLAMA_MODEL` | `qwen2.5:7b` | local model, used by `scripts/chat_ollama.py` |

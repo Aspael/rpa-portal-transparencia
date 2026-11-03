@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     query_timeout_seconds: float = Field(default=120, gt=0)
     navigation_timeout_ms: int = Field(default=30_000, gt=0)
     waf_wait_ms: int = Field(default=8000, ge=0, le=30000)
+    # Modo assistido: se o portal pedir verificação humana, a consulta é refeita num
+    # Chromium visível para a pessoa resolver; o robô só espera e depois continua.
+    # Exige tela (WSLg, desktop Linux, Windows, macOS ou compose.assisted.yaml).
+    assisted_mode: bool = False
+    assisted_wait_seconds: float = Field(default=180, gt=0, le=900)
     max_detail_pages: int = Field(default=100, ge=1)
     api_key: SecretStr | None = None
     google_token_file: Path = Path("secrets/google-token.json")

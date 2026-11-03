@@ -1,0 +1,13 @@
+# Modo assistido no WSL (WSLg): o contêiner abre a janela do Chromium no Windows
+# quando o portal pede verificação humana. A pessoa resolve na janela e a consulta
+# continua. Uso:
+#   docker compose -f compose.yaml -f compose.assisted.yaml up -d
+# Fora do WSL, use python run.py --local com ASSISTED_MODE=true no .env.
+services:
+  api:
+    environment:
+      ASSISTED_MODE: "true"
+      DISPLAY: "${DISPLAY:-:0}"
+    volumes:
+      # Socket X11 do WSLg; o Chromium do contêiner desenha a janela por ele.
+      - /mnt/wslg/.X11-unix:/tmp/.X11-unix

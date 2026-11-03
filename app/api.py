@@ -56,13 +56,16 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
     app.mount("/static", StaticFiles(directory=static), name="static")
 
     @app.get("/", include_in_schema=False)
-    async def home():
+    async def home(request: Request):
         page = (static / "index.html").read_text(encoding="utf-8")
         key = settings.api_key.get_secret_value() if settings.api_key else ""
         if key and settings.front_api_key_from_env:
             # Chave do .env embutida na página; o campo do front, se preenchido, tem prioridade.
             page = page.replace('<meta name="api-key" content="">',
                                 f'<meta name="api-key" content="{html.escape(key, quote=True)}">', 1)
+        # Robôs de teste podem não ter o atributo; sem ele, o modo assistido fica desligado.
+        if getattr(request.app.state.robot, "assisted_available", False):
+            page = page.replace('<meta name="assisted-mode" content="false">', '<meta name="assisted-mode" content="true">', 1)
         return HTMLResponse(page, headers={"Cache-Control": "no-store"})
     api_key = APIKeyHeader(name="X-API-Key", auto_error=False)
 

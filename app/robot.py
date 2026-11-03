@@ -1,10 +1,12 @@
 import asyncio
 import base64
+import logging
 import os
 import re
 import sys
 from time import monotonic
 from contextlib import suppress
+from contextvars import ContextVar
 
 from playwright.async_api import (
     Browser, Error as PlaywrightError, Page,
@@ -17,6 +19,9 @@ from app.models import Benefit, Diagnostic, Evidence, Person, Query, Result
 
 TIMEOUT_MESSAGE = "Não foi possível retornar os dados no tempo de resposta solicitado"
 PERSON_PATH = re.compile(r"/(?:busca/)?pessoa-fisica/\d+(?:-[^/?#]+)?(?:[/?#]|$)")
+log = logging.getLogger(__name__)
+# True durante a execução assistida: o bloqueio espera a pessoa em vez de encerrar.
+_assisted: ContextVar[bool] = ContextVar("assisted", default=False)
 
 
 def _has_display() -> bool:
@@ -38,8 +43,17 @@ class Robot:
         self._slots = asyncio.Semaphore(settings.max_concurrent)
         self._playwright = None
         self._browser: Browser | None = None
+        self._visible_browser: Browser | None = None
+        # Uma janela assistida por vez: a pessoa resolve uma verificação de cada vez.
+        self._assisted_lock = asyncio.Lock()
+
+    @property
+    def assisted_available(self) -> bool:
+        return self.settings.assisted_mode and _has_display()
 
     async def start(self):
+        if self.settings.assisted_mode and not _has_display():
+            log.warning("ASSISTED_MODE=true, mas não há tela (DISPLAY/WAYLAND_DISPLAY); o modo assistido fica desativado")
         self._playwright = await async_playwright().start()
         try:
             self._browser = await self._playwright.chromium.launch(
@@ -53,25 +67,57 @@ class Robot:
 
     async def close(self):
         try:
-            if self._browser:
-                await self._browser.close()
+            for browser in (self._visible_browser, self._browser):
+                if browser:
+                    with suppress(PlaywrightError):
+                        await browser.close()
         finally:
             if self._playwright:
                 await self._playwright.stop()
 
+    async def _visible(self) -> Browser:
+        """Chromium com janela, aberto só quando a primeira consulta assistida precisa dele."""
+        if not self._visible_browser or not self._visible_browser.is_connected():
+            self._visible_browser = await self._playwright.chromium.launch(
+                headless=False, args=["--disable-dev-shm-usage", "--disable-gpu"])
+        return self._visible_browser
+
     async def query(self, query: Query) -> Result:
+        result = await self._run(query, self._browser, self.settings.query_timeout_seconds)
+        if result.codigo != "PORTAL_BLOQUEADO" or not self.settings.assisted_mode:
+            return result
+        if not self.assisted_available:
+            result.mensagem += (". Modo assistido indisponível: não há tela para abrir o navegador "
+                                "(use compose.assisted.yaml no WSL ou python run.py --local)")
+            return result
+        # Mesma consulta, agora numa janela visível em que a pessoa resolve a verificação.
+        async with self._assisted_lock:
+            token = _assisted.set(True)
+            try:
+                assisted = await self._run(query, await self._visible(),
+                                           self.settings.query_timeout_seconds + self.settings.assisted_wait_seconds)
+            except PlaywrightError:
+                result.mensagem += ". Não foi possível abrir o navegador visível do modo assistido"
+                return result
+            finally:
+                _assisted.reset(token)
+        assisted.modo_execucao = "assistido"
+        assisted.duracao_ms += result.duracao_ms
+        return assisted
+
+    async def _run(self, query: Query, browser: Browser | None, timeout: float) -> Result:
         result = Result()
         started = monotonic()
         context = None
         page = None
         try:
             # O prazo inclui a espera por uma vaga, evitando filas sem limite de tempo.
-            async with asyncio.timeout(self.settings.query_timeout_seconds):
+            async with asyncio.timeout(timeout):
                 async with self._slots:
                     result.etapa = "abrindo_navegador"
-                    if not self._browser:
+                    if not browser:
                         raise PortalError("INDISPONIVEL", "Navegador não inicializado")
-                    context = await self._browser.new_context(locale="pt-BR", viewport={"width": 1440, "height": 1000})
+                    context = await browser.new_context(locale="pt-BR", viewport={"width": 1440, "height": 1000})
                     context.set_default_timeout(self.settings.navigation_timeout_ms)
                     page = await context.new_page()
                     await self._collect(page, query, result)
@@ -100,18 +146,40 @@ class Robot:
                     benefit.erro = result.mensagem
         return result
 
-    async def _check_block(self, page: Page):
+    async def _block_reason(self, page: Page) -> str | None:
         # AWS WAF pode devolver HTTP 202 com título/corpo vazios. O DOM
         # identifica esse caso antes da espera pelo campo de busca.
         if await page.locator('#challenge-container, #captcha-container').count():
-            raise PortalError("PORTAL_BLOQUEADO", "O portal apresentou um desafio antirrobô (AWS WAF/CAPTCHA)")
+            return "O portal apresentou um desafio antirrobô (AWS WAF/CAPTCHA)"
         text = (await page.locator("body").inner_text()).casefold()
         title = (await page.title()).casefold()
         if any(word in title + " " + text for word in (
             "human verification", "verify that you're not a robot", "verifique que você é humano",
             "access denied", "acesso negado", "captcha",
         )):
-            raise PortalError("PORTAL_BLOQUEADO", "O portal exigiu verificação humana ou bloqueou o acesso automatizado")
+            return "O portal exigiu verificação humana ou bloqueou o acesso automatizado"
+        return None
+
+    async def _check_block(self, page: Page) -> bool:
+        """Sem bloqueio, retorna False. Bloqueado: encerra com PORTAL_BLOQUEADO ou, no modo
+        assistido, espera a pessoa resolver na janela e retorna True. Não resolve CAPTCHA."""
+        reason = await self._block_reason(page)
+        if not reason:
+            return False
+        if not _assisted.get():
+            raise PortalError("PORTAL_BLOQUEADO", reason)
+        with suppress(PlaywrightError):
+            await page.bring_to_front()
+        deadline = monotonic() + self.settings.assisted_wait_seconds
+        while monotonic() < deadline:
+            await asyncio.sleep(1)
+            try:
+                if not await self._block_reason(page):
+                    return True
+            except PlaywrightError:
+                pass  # a página está navegando após a verificação; confere de novo
+        raise PortalError("PORTAL_BLOQUEADO", "A verificação humana não foi concluída na janela do navegador "
+                          f"em {self.settings.assisted_wait_seconds:g} s")
 
     async def _goto(self, page: Page, url: str, ready_selector: str | None = None):
         if not portal_url(url):
@@ -122,7 +190,7 @@ class Robot:
         if self.settings.waf_wait_ms and await page.locator('#challenge-container').count():
             with suppress(PlaywrightTimeoutError):
                 await page.locator('#challenge-container').wait_for(state="detached", timeout=self.settings.waf_wait_ms)
-        await self._check_block(page)
+        resolved = await self._check_block(page)
         if ready_selector:
             try:
                 await page.locator(ready_selector).first.wait_for(state="attached")
@@ -132,7 +200,8 @@ class Robot:
             # O elemento real da página confirma o fim da navegação normal.
             await self._check_block(page)
             return
-        if response and response.status >= 400:
+        # Depois da verificação na janela, o status da primeira resposta (o desafio) não vale mais.
+        if response and response.status >= 400 and not resolved:
             raise PortalError("PORTAL_INDISPONIVEL", f"Portal respondeu HTTP {response.status}")
 
     async def _wait(self, page: Page, predicate):

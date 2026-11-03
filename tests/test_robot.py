@@ -44,6 +44,13 @@ class FixtureRobot(Robot):
         self.blocked, self.detail_blocked = blocked, detail_blocked
         self.stalled, self.benefits = stalled, benefits
         self.requests = []
+        # blocked="solvable": as N primeiras páginas pedem verificação e se recarregam
+        # sozinhas, simulando a pessoa que resolve a verificação na janela.
+        self.blocks_left = 2
+
+    async def _visible(self):
+        # Nos testes, a "janela" é o mesmo Chromium headless com as rotas interceptadas.
+        return self._browser
 
     async def start(self):
         await super().start()
@@ -60,9 +67,13 @@ class FixtureRobot(Robot):
         url = urlparse(route.request.url)
         self.requests.append(route.request.url)
         query = parse_qs(url.query)
-        if self.blocked == "waf":
+        if self.blocked == "solvable" and self.blocks_left:
+            self.blocks_left -= 1
+            html = ("<html><title>Human Verification</title><body>CAPTCHA"
+                    "<script>setTimeout(() => location.reload(), 500)</script></body></html>")
+        elif self.blocked == "waf":
             html = '<html><title></title><body><div id="challenge-container"></div></body></html>'
-        elif self.blocked or (self.detail_blocked and "/beneficiario/" in url.path):
+        elif (self.blocked and self.blocked != "solvable") or (self.detail_blocked and "/beneficiario/" in url.path):
             html = "<html><title>Human Verification</title><body>CAPTCHA</body></html>"
         elif url.path == "/":
             html = HOME
@@ -129,6 +140,32 @@ def test_captcha_is_explicit():
     assert result.status == "erro"
     assert result.codigo == "PORTAL_BLOQUEADO"
     assert result.pessoa is None
+
+
+def test_assisted_mode_waits_for_the_person_and_continues(monkeypatch):
+    # 1º bloqueio: execução headless encerra; 2º: a janela assistida espera a "pessoa" e segue.
+    monkeypatch.setattr("app.robot._has_display", lambda: True)
+    settings = Settings(_env_file=None, query_timeout_seconds=15, assisted_mode=True, assisted_wait_seconds=10)
+    result, _ = asyncio.run(collect(Query(termo="Maria Teste"), blocked="solvable", settings=settings))
+    assert result.status == "sucesso", result.mensagem
+    assert result.modo_execucao == "assistido"
+    assert result.pessoa.nome == "PESSOA FICTÍCIA 1"
+
+
+def test_assisted_mode_gives_up_after_the_wait(monkeypatch):
+    monkeypatch.setattr("app.robot._has_display", lambda: True)
+    settings = Settings(_env_file=None, query_timeout_seconds=15, assisted_mode=True, assisted_wait_seconds=2)
+    result, _ = asyncio.run(collect(Query(termo="Teste"), blocked=True, settings=settings))
+    assert (result.codigo, result.modo_execucao) == ("PORTAL_BLOQUEADO", "assistido")
+    assert "não foi concluída" in result.mensagem
+
+
+def test_assisted_mode_without_screen_explains_why(monkeypatch):
+    monkeypatch.setattr("app.robot._has_display", lambda: False)
+    settings = Settings(_env_file=None, query_timeout_seconds=15, assisted_mode=True)
+    result, _ = asyncio.run(collect(Query(termo="Teste"), blocked=True, settings=settings))
+    assert (result.codigo, result.modo_execucao) == ("PORTAL_BLOQUEADO", "autonomo")
+    assert "Modo assistido indisponível" in result.mensagem
 
 
 def test_blank_waf_page_is_detected_and_has_diagnostic():
