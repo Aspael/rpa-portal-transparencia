@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="44" viewBox="0 0 1000 44" role="img" aria-labelledby="t">
+  <title id="t">Stack: Python, FastAPI, PostgreSQL, Playwright, MCP, Ollama, n8n, Docker</title>
+  <style>
+    text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:13px;font-weight:600;fill:#172b32}
+    rect{fill:#ffffff;stroke:#cfdcd6}
+    .dot{fill:#166658}
+    @media (prefers-color-scheme: dark){text{fill:#e2ece8}rect{fill:#14272b;stroke:#2c4b45}.dot{fill:#7fd3b2}}
+    g{opacity:0;animation:in .6s ease-out forwards}
+    g:nth-of-type(2){animation-delay:.08s}g:nth-of-type(3){animation-delay:.16s}g:nth-of-type(4){animation-delay:.24s}
+    g:nth-of-type(5){animation-delay:.32s}g:nth-of-type(6){animation-delay:.40s}g:nth-of-type(7){animation-delay:.48s}
+    g:nth-of-type(8){animation-delay:.56s}
+    @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    .dot{animation:blink 2.4s ease-in-out infinite}
+    @keyframes blink{50%{opacity:.35}}
+    @media (prefers-reduced-motion: reduce){g{animation:none;opacity:1}.dot{animation:none}}
+  </style>
+  <!-- 8 pílulas de 112 px com 14 px entre elas, centralizadas em 1000 px -->
+  <g><rect x="3" y="6" width="108" height="32" rx="16"/><circle class="dot" cx="21" cy="22" r="4"/><text x="33" y="27">Python</text></g>
+  <g><rect x="127" y="6" width="112" height="32" rx="16"/><circle class="dot" cx="145" cy="22" r="4"/><text x="157" y="27">FastAPI</text></g>
+  <g><rect x="255" y="6" width="128" height="32" rx="16"/><circle class="dot" cx="273" cy="22" r="4"/><text x="285" y="27">PostgreSQL</text></g>
+  <g><rect x="399" y="6" width="120" height="32" rx="16"/><circle class="dot" cx="417" cy="22" r="4" style="animation-delay:.3s"/><text x="429" y="27">Playwright</text></g>
+  <g><rect x="535" y="6" width="92" height="32" rx="16"/><circle class="dot" cx="553" cy="22" r="4" style="animation-delay:.6s"/><text x="565" y="27">MCP</text></g>
+  <g><rect x="643" y="6" width="106" height="32" rx="16"/><circle class="dot" cx="661" cy="22" r="4" style="animation-delay:.9s"/><text x="673" y="27">Ollama</text></g>
+  <g><rect x="765" y="6" width="88" height="32" rx="16"/><circle class="dot" cx="783" cy="22" r="4" style="animation-delay:1.2s"/><text x="795" y="27">n8n</text></g>
+  <g><rect x="869" y="6" width="112" height="32" rx="16"/><circle class="dot" cx="887" cy="22" r="4" style="animation-delay:1.5s"/><text x="899" y="27">Docker</text></g>
+</svg>

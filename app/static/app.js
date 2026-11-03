@@ -452,11 +452,13 @@ function storeSession(id) {
 }
 
 // Texto do modelo sem HTML: só **negrito**, quebras de linha e citações [n].
+// O CPF mascarado (***.123.456-**) entra antes no split para os asteriscos não virarem negrito.
+const MASKED_CPF = /^\*{3}\.\d{3}\.\d{3}-\*{2}$/;
 function richText(text, sources) {
   const fragment = document.createDocumentFragment();
-  for (const part of text.split(/(\*\*[^*]+\*\*|\[\d\])/g)) {
+  for (const part of text.split(/(\*{3}\.\d{3}\.\d{3}-\*{2}|\*\*[^*\s][^*]*\*\*|\[\d\])/g)) {
     if (!part) continue;
-    const bold = part.match(/^\*\*([^*]+)\*\*$/);
+    const bold = !MASKED_CPF.test(part) && part.match(/^\*\*([^*]+)\*\*$/);
     const cite = part.match(/^\[(\d)\]$/);
     if (bold) {
       const strong = document.createElement('strong'); strong.textContent = bold[1]; fragment.append(strong);

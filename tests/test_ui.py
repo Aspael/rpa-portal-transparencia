@@ -58,7 +58,7 @@ def test_ui_search_error_download_export_and_mobile():
                         chats.append(request.request.post_data_json)
                         await request.fulfill(json={
                             "sessao_id": "sessao-teste-1", "modelo": "qwen2.5:7b", "memoria_turnos": len(chats),
-                            "resposta": "O CPF vem **mascarado** para proteger a pessoa [1].",
+                            "resposta": "O CPF vem **mascarado** (***.085.106-**) para proteger a pessoa [1].",
                             "ferramentas": [{"nome": "consultar_pessoa", "argumentos": {"termo": "20643890445"}, "status": "sucesso"}],
                             "fontes": [{"n": 1, "titulo": "Por que o CPF aparece com asteriscos", "arquivo": "app/conhecimento/observa.md", "citada": True}]})
                     elif "/chat/" in url and request.request.method == "DELETE":
@@ -145,6 +145,8 @@ def test_ui_search_error_download_export_and_mobile():
                 await chat.get_by_label("Pergunta para o assistente").press("Enter")
                 await expect(chat.locator(".chat-msg.assistant").last).to_contain_text("O CPF vem mascarado")
                 await expect(chat.locator(".chat-msg.assistant strong").last).to_have_text("mascarado")
+                await expect(chat.locator(".chat-msg.assistant").last).to_contain_text("(***.085.106-**)")
+                await expect(chat.locator(".chat-msg.assistant").last.locator("strong")).to_have_count(1)
                 await expect(chat.locator(".chat-used")).to_contain_text('consultar_pessoa(termo: "20643890445")')
                 await expect(chat.locator(".cite")).to_have_text("1")
                 assert chats == [{"mensagem": "Por que o CPF tem asteriscos?"}]
