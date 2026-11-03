@@ -51,6 +51,29 @@ def test_front_uses_env_api_key_unless_disabled():
         assert '<meta name="api-key" content="">' in page and "env-key" not in page
 
 
+class StubPortalApi(StubRobot):
+    async def query(self, query):
+        return Result(status="sucesso", modo_execucao="api_oficial")
+
+
+def test_query_source_api_never_uses_the_website():
+    cpf = {"termo": "123.456.789-01"}
+    settings = Settings(_env_file=None, query_source="api", portal_api_key="gov-key")
+    with TestClient(create_app(settings, SuccessRobot, portal_api_factory=StubPortalApi)) as client:
+        assert client.post("/consultas", json=cpf).json()["modo_execucao"] == "api_oficial"
+        response = client.post("/consultas", json={"termo": "Maria"})
+        assert (response.status_code, response.json()["codigo"]) == (422, "BUSCA_POR_NOME_SEM_API")
+        assert client.app.state.robot.calls == []
+    with TestClient(create_app(Settings(_env_file=None, query_source="api"), SuccessRobot)) as client:
+        response = client.post("/consultas", json=cpf)
+        assert (response.status_code, response.json()["codigo"]) == (503, "CHAVE_PORTAL_AUSENTE")
+        assert client.app.state.robot.calls == []
+    with TestClient(create_app(Settings(_env_file=None, query_source="site", portal_api_key="gov-key"),
+                               SuccessRobot, portal_api_factory=StubPortalApi)) as client:
+        client.post("/consultas", json=cpf)
+        assert client.app.state.robot.calls == ["12345678901"]
+
+
 def test_deployment_cannot_start_without_required_key():
     with pytest.raises(RuntimeError, match="API_KEY"):
         with TestClient(create_app(Settings(require_api_key=True, api_key=None), StubRobot)):

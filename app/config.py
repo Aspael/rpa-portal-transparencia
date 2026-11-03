@@ -1,6 +1,7 @@
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
+from typing import Literal
 
 
 class Settings(BaseSettings):
@@ -23,6 +24,9 @@ class Settings(BaseSettings):
     portal_api_key: SecretStr | None = None
     portal_api_url: str = "https://api.portaldatransparencia.gov.br/api-de-dados"
     portal_api_max_rpm: int = Field(default=80, ge=1, le=300)
+    # De onde vêm as consultas: "auto" usa a API para CPF/NIS (com chave) e o site
+    # para nome; "api" nunca abre o site (sem CAPTCHA, só CPF/NIS); "site" sempre usa o robô.
+    query_source: Literal["auto", "api", "site"] = "auto"
     # Histórico no PostgreSQL: vazio desativa a gravação das consultas.
     database_url: SecretStr | None = None
     # Horas em que um resultado com sucesso do histórico é reaproveitado; 0 sempre consulta o portal.
