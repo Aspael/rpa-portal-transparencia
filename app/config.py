@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     google_token_file: Path = Path("secrets/google-token.json")
     google_token_json: SecretStr | None = None
     require_api_key: bool = False
+    # O front servido em "/" usa o API_KEY do .env sem precisar digitar a chave.
+    # Em deploy público use false: quem abrir a página receberia a chave.
+    front_api_key_from_env: bool = True
     # API de Dados oficial: com chave, consultas por CPF/NIS não usam o site.
     portal_api_key: SecretStr | None = None
     portal_api_url: str = "https://api.portaldatransparencia.gov.br/api-de-dados"

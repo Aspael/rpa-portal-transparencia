@@ -282,7 +282,7 @@ Don't use a value copied from examples or documentation: anyone who reads the re
 
 **How to use it.**
 
-- **Front end** (`http://localhost:8000`): open "API access key" (*Chave de acesso da API*) and paste the same value as `API_KEY`. It is valid only for that tab and is not saved.
+- **Front end** (`http://localhost:8000`): uses the `API_KEY` from `.env` automatically (`FRONT_API_KEY_FROM_ENV=true`, the default). The "API access key" field (*Chave de acesso da API*) is optional: when filled in, it overrides the `.env` key for that tab only and is not saved. The deploy files (VPS, Easypanel, Render) set `FRONT_API_KEY_FROM_ENV=false`, because anyone opening the page would receive the key; in that case the field is required again.
 - **curl**: `-H 'X-API-Key: YOUR_VALUE'` (example in [API](#api)).
 - **n8n**: *Header Auth* credential with name `X-API-Key` and the same value (see [Configure and activate the workflow in n8n](#configure-and-activate-the-workflow-in-n8n)).
 

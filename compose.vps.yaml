@@ -10,6 +10,7 @@ services:
     environment:
       HEADLESS: "true"
       REQUIRE_API_KEY: "true"
+      FRONT_API_KEY_FROM_ENV: "false"
       API_KEY: "${API_KEY:?Defina API_KEY no arquivo de ambiente da VPS}"
       MAX_CONCURRENT: "${MAX_CONCURRENT:-2}"
       PORTAL_API_KEY: "${PORTAL_API_KEY:-}"
