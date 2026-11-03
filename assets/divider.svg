@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="12" viewBox="0 0 1200 12" role="img" aria-label="">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#166658" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#166658" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#166658" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d6ed95" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#9bd16d"/>
+      <stop offset="1" stop-color="#d6ed95" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .run{animation:run 4.5s ease-in-out infinite}
+    @keyframes run{0%{transform:translateX(-260px)}70%,100%{transform:translateX(1200px)}}
+    @media (prefers-reduced-motion: reduce){.run{animation:none;opacity:0}}
+  </style>
+  <rect x="0" y="5" width="1200" height="2" rx="1" fill="url(#base)"/>
+  <rect class="run" x="0" y="4" width="240" height="4" rx="2" fill="url(#spark)"/>
+  <circle cx="600" cy="6" r="4" fill="#166658"/>
+</svg>

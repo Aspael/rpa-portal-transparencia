@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="t d">
+  <title id="t">Observa: one query, the whole picture</title>
+  <desc id="d">Bolsa Família payments from Brazil's Transparency Portal, served through an API, MCP tools and an AI chat. The open-data files flow into PostgreSQL and out as JSON.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" class="bg1"/>
+      <stop offset="1" class="bg2"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" class="glow1"/>
+      <stop offset="1" class="glow2"/>
+    </radialGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#166658" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#166658" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#166658" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="card"><rect width="1200" height="320" rx="24"/></clipPath>
+    <path id="flow" d="M 214 268 L 488 268 L 768 268"/>
+  </defs>
+  <style>
+    .bg1{stop-color:#ffffff}.bg2{stop-color:#eef4f1}
+    .glow1{stop-color:#d6ed95;stop-opacity:.75}.glow2{stop-color:#d6ed95;stop-opacity:0}
+    .ink{fill:#172b32}.muted{fill:#5d6e76}.green{fill:#166658}.line{stroke:#cfdcd6}
+    .pill{fill:#ffffff;stroke:#cfdcd6}.pill-text{fill:#172b32}
+    .ring{fill:none;stroke:#166658}
+    @media (prefers-color-scheme: dark){
+      .bg1{stop-color:#0f1d22}.bg2{stop-color:#13302b}
+      .glow1{stop-color:#3d7f4f;stop-opacity:.55}
+      .ink{fill:#eef4f1}.muted{fill:#9fb3b0}.green{fill:#7fd3b2}.line{stroke:#2c4b45}
+      .pill{fill:#14272b;stroke:#2c4b45}.pill-text{fill:#e2ece8}
+      .ring{stroke:#7fd3b2}
+    }
+    text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+    .eyebrow{font-size:13px;font-weight:800;letter-spacing:3.5px}
+    .h1{font-size:50px;font-weight:800;letter-spacing:-1.5px}
+    .sub{font-size:18px}
+    .pill-text{font-size:14px;font-weight:600}
+    .rise{opacity:0;animation:rise .9s cubic-bezier(.2,.7,.2,1) forwards}
+    .r2{animation-delay:.15s}.r3{animation-delay:.3s}.r4{animation-delay:.5s}
+    @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+    .pulse{transform-origin:968px 150px;animation:pulse 3.2s ease-out infinite}
+    .p2{animation-delay:1.06s}.p3{animation-delay:2.13s}
+    @keyframes pulse{0%{transform:scale(.25);opacity:.9}100%{transform:scale(1.55);opacity:0}}
+    .orbit{transform-origin:968px 150px;animation:spin 14s linear infinite}
+    .orbit.rev{animation-duration:22s;animation-direction:reverse}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .dash{stroke-dasharray:6 8;animation:dash 1.2s linear infinite}
+    @keyframes dash{to{stroke-dashoffset:-14}}
+    .shine{animation:shine 5s ease-in-out infinite}
+    @keyframes shine{0%{transform:translateX(-500px)}60%,100%{transform:translateX(1400px)}}
+    @media (prefers-reduced-motion: reduce){
+      .rise{animation:none;opacity:1}.pulse,.orbit,.dash,.shine{animation:none}
+      .pulse{opacity:.25}.p2,.p3{opacity:0}
+    }
+  </style>
+
+  <g clip-path="url(#card)">
+    <rect width="1200" height="320" fill="url(#bg)"/>
+    <circle cx="968" cy="150" r="230" fill="url(#glow)"/>
+    <rect class="shine" x="0" y="0" width="420" height="3" fill="url(#sweep)"/>
+  </g>
+  <rect x="0.5" y="0.5" width="1199" height="319" rx="23.5" fill="none" class="line" stroke-width="1"/>
+
+  <!-- texto -->
+  <text x="64" y="70" class="eyebrow green rise">PUBLIC DATA · WITH EVIDENCE</text>
+  <text x="64" y="128" class="h1 ink rise r2">One query.</text>
+  <text x="64" y="184" class="h1 ink rise r2">The whole picture.</text>
+  <text x="64" y="222" class="sub muted rise r3">Bolsa Família payments from Brazil's Transparency Portal · API · MCP · AI chat</text>
+
+  <!-- fluxo: dados abertos → PostgreSQL → JSON -->
+  <g class="rise r4">
+    <line x1="214" y1="268" x2="768" y2="268" class="line dash" stroke-width="2"/>
+    <!-- os pontos passam por baixo das pílulas -->
+    <circle r="5" class="green"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#flow"/></animateMotion></circle>
+    <circle r="5" class="green" opacity=".55"><animateMotion dur="2.6s" begin="0.87s" repeatCount="indefinite"><mpath href="#flow"/></animateMotion></circle>
+    <circle r="5" class="green" opacity=".3"><animateMotion dur="2.6s" begin="1.74s" repeatCount="indefinite"><mpath href="#flow"/></animateMotion></circle>
+    <rect x="64" y="250" width="150" height="36" rx="18" class="pill"/>
+    <text x="139" y="273" text-anchor="middle" class="pill-text">Open-data ZIP</text>
+    <rect x="413" y="250" width="150" height="36" rx="18" class="pill"/>
+    <text x="488" y="273" text-anchor="middle" class="pill-text">PostgreSQL</text>
+    <rect x="693" y="250" width="186" height="36" rx="18" class="pill"/>
+    <text x="786" y="273" text-anchor="middle" class="pill-text">API · MCP · Chat</text>
+  </g>
+
+  <!-- marca ◉ com pulso -->
+  <circle cx="968" cy="150" r="80" class="ring pulse" stroke-width="2"/>
+  <circle cx="968" cy="150" r="80" class="ring pulse p2" stroke-width="2"/>
+  <circle cx="968" cy="150" r="80" class="ring pulse p3" stroke-width="2"/>
+  <circle cx="968" cy="150" r="58" class="ring" stroke-width="10"/>
+  <circle cx="968" cy="150" r="30" class="green"/>
+  <g class="orbit">
+    <circle cx="968" cy="40" r="6" class="green"/>
+    <circle cx="1078" cy="150" r="4" class="green" opacity=".6"/>
+  </g>
+  <g class="orbit rev">
+    <circle cx="968" cy="282" r="4.5" class="green" opacity=".7"/>
+    <circle cx="840" cy="150" r="3.5" class="green" opacity=".5"/>
+  </g>
+</svg>

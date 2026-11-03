@@ -1,6 +1,70 @@
-# Observa — Bolsa Família data from Brazil's Transparency Portal
+<div align="center">
 
-**Observa** looks up who received payments from **Bolsa Família**, Brazil's federal cash-transfer program for low-income families, and from related social programs. The data comes from the **Portal da Transparência**, the Brazilian federal government's transparency portal maintained by the Controladoria-Geral da União (CGU, the federal comptroller's office). Observa returns everything as structured JSON through an API, a web front end and an MCP tool, and keeps a history of queries in PostgreSQL.
+<img src="assets/logo.svg" alt="observa" width="231">
+
+# Bolsa Família data from Brazil's Transparency Portal
+
+<img src="assets/hero.svg" alt="One query. The whole picture. Open-data files flow into PostgreSQL and out through the API, MCP tools and an AI chat." width="100%">
+
+<p>
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="#screenshots"><b>Screenshots</b></a> ·
+  <a href="#what-the-data-is"><b>Data</b></a> ·
+  <a href="#api"><b>API</b></a> ·
+  <a href="docs/mcp.md"><b>MCP tools</b></a> ·
+  <a href="docs/chat.md"><b>AI chat</b></a> ·
+  <a href="#configuration"><b>Configuration</b></a>
+</p>
+
+<img src="assets/stack.svg" alt="Python · FastAPI · PostgreSQL · Playwright · MCP · Ollama · n8n · Docker" width="760">
+
+</div>
+
+<img src="assets/divider.svg" alt="" width="100%">
+
+**Observa** looks up who received payments from **Bolsa Família**, Brazil's federal cash-transfer program for low-income families, and from related social programs. The data comes from the **Portal da Transparência**, the Brazilian federal government's transparency portal maintained by the Controladoria-Geral da União (CGU, the federal comptroller's office). Observa returns everything as structured JSON through an API, a web front end, MCP tools and an AI chat, and keeps a history of queries in PostgreSQL.
+
+<table>
+  <tr>
+    <td width="33%" valign="top"><h3>◉ Local open data</h3><p>Monthly files of the portal imported into PostgreSQL by year and month, from the front end, the API or MCP. Queries never touch the government site: no CAPTCHA, no key, no rate limit.</p></td>
+    <td width="33%" valign="top"><h3>⌕ Search and overview</h3><p>Full name or NIS returns the person, a summary and every installment grouped by program and month. A pop-up browses the imported data by name, NIS, state or municipality.</p></td>
+    <td width="33%" valign="top"><h3>✦ MCP and AI chat</h3><p>Six MCP tools at <code>/mcp</code> for any client (Claude Code, Ollama, n8n) and a built-in chat with RAG over the docs and short-term memory.</p></td>
+  </tr>
+</table>
+
+## Quick start
+
+```bash
+git clone https://github.com/GeorgeLucas1/rpa-portal-transparencia.git
+cd rpa-portal-transparencia
+python run.py        # builds and starts API, PostgreSQL, pgAdmin and n8n, then opens http://127.0.0.1:8000
+```
+
+> [!TIP]
+> On the page, open **03 · Base local**, import one month for one state (e.g. *Novo Bolsa Família · March · AM*) and search a full name or NIS in **01 · Nova consulta**. Details in [Everything with one command](#everything-with-one-command) and [Run locally](#run-locally).
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/screenshot-consulta.png" alt="Front end: a query by name returns the person, masked CPF, NIS, location and the programs found" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="62%" valign="top"><img src="assets/screenshot-base-local.png" alt="Pop-up Consultar dados importados: pick an imported month and search by name, NIS, state or municipality"><br><sub><b>Consultar dados importados</b>: browse an imported month by name, NIS, state or municipality; <i>Ver panorama</i> runs the full query.</sub></td>
+    <td width="38%" valign="top"><img src="assets/screenshot-chat.png" alt="AI chat answering with the MCP tools it called and the documentation sources"><br><sub><b>Assistente</b>: answers with the MCP tools it called and the documentation it cited.</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary><b>The “i” button: MCP tools available to the chat</b></summary>
+<br>
+<p align="center"><img src="assets/screenshot-chat-tools.png" alt="Chat panel listing every MCP tool and whether the chat uses it" width="420"></p>
+</details>
+
+<sub>Screenshots use fictional names and numbers.</sub>
+
+<img src="assets/divider.svg" alt="" width="100%">
 
 ## What the data is
 
@@ -30,6 +94,7 @@ Observa can get the data in three ways, chosen with `QUERY_SOURCE`:
 
 The default needs no key and never hits a CAPTCHA: the files are downloaded and imported beforehand (see [Data source: local open data](#data-source-local-open-data-default)), and each query is a local SQL lookup. The robot and the Data API are kept for when you need live data or a screenshot.
 
+> [!IMPORTANT]
 > **Keys in `.env`.** The default mode only needs `API_KEY` if you want to protect your own API. `PORTAL_API_KEY` is used only by the `api`/`auto` modes.
 >
 > | Variable | What it is | Format | Where to put it |
@@ -71,13 +136,17 @@ Application links:
 
 The query endpoints require a key in the `X-API-Key` header. The evaluation key is shared separately and is not stored in the repository. The `/mcp` endpoint uses the same key. See [Access keys](#access-keys) for the difference between this key and the government key.
 
+<img src="assets/divider.svg" alt="" width="100%">
+
 ## Solution flow
 
 ```mermaid
 flowchart LR
-    P[Portal da Transparência: monthly open-data ZIP] -->|app.importar_dados| DB[(PostgreSQL: pagamentos)]
-    A[Input: full name or NIS] --> B[FastAPI API]
-    O[Ollama: local model] <--> H[MCP client]
+    P[Portal da Transparência: monthly open-data ZIP] -->|import by year/month| DB[(PostgreSQL: pagamentos)]
+    A[Front end: full name or NIS] --> B[FastAPI API]
+    C[Front-end chat] -->|/chat| R[Ollama + RAG + memory]
+    R -->|tools in-process| N
+    O[Ollama / Claude Code / n8n] <--> H[MCP client]
     H --> N[MCP server /mcp]
     N --> B
     B -->|SQL lookup| DB
@@ -122,6 +191,8 @@ docker compose exec api python -m app.importar_dados --listar
 - Errors: `BASE_VAZIA` (nothing imported yet), `BASE_LOCAL_DESATIVADA` (no `DATABASE_URL`), `BASE_LOCAL_INDISPONIVEL` (PostgreSQL unreachable), all HTTP 503.
 
 The robot (website) and the official Data API are still available with `QUERY_SOURCE=auto`, `api` or `site`, described below.
+
+<img src="assets/divider.svg" alt="" width="100%">
 
 ## Run locally
 
@@ -177,24 +248,24 @@ curl -X POST http://127.0.0.1:8000/consultas \
 
 ### History in PostgreSQL
 
-Com `DATABASE_URL` definido, o histórico usa SQLAlchemy (ORM assíncrono, modelo `Consulta` em `app/history.py`) sobre a tabela `consultas`, criada automaticamente no primeiro uso. O JSON completo fica na coluna `resultado` (`jsonb`), e termo, nome, CPF, NIS, status e data ficam em colunas próprias para filtro.
+With `DATABASE_URL` set, the history uses SQLAlchemy (async ORM, `Consulta` model in `app/history.py`) on the `consultas` table, created automatically on first use. The full JSON is stored in the `resultado` column (`jsonb`), and term, name, CPF, NIS, status and date have their own columns for filtering.
 
-Fluxo de `POST /consultas`:
+How `POST /consultas` works:
 
-1. **SELECT**: procura no PostgreSQL um resultado com sucesso para o mesmo termo (sem diferenciar maiúsculas) e o mesmo filtro de programa social, gravado nas últimas `HISTORY_CACHE_HOURS` horas (padrão 24). Se achar, devolve esse resultado com `"origem": "historico"`, sem ir ao portal.
-2. Senão, consulta o portal (`"origem": "portal"`).
-3. **INSERT**: só resultados com `status: "sucesso"` são gravados; parcial e erro não entram no histórico, e a próxima tentativa volta ao portal.
+1. **SELECT**: looks in PostgreSQL for a successful result for the same term (case-insensitive) and the same social-program filter, stored within the last `HISTORY_CACHE_HOURS` hours (default 24). If found, it returns that result with `"origem": "historico"`, without querying the source.
+2. Otherwise, it queries the configured source (`"origem": "portal"`).
+3. **INSERT**: only results with `status: "sucesso"` are stored; partial results and errors stay out of the history, so the next attempt queries the source again.
 
-Envie `"atualizar": true` no corpo para ignorar o histórico e forçar nova consulta; `HISTORY_CACHE_HOURS=0` desativa o reaproveitamento. Se o banco cair, a consulta continua respondendo normalmente e a falha aparece só no log.
+Send `"atualizar": true` in the body to skip the history and force a new query; `HISTORY_CACHE_HOURS=0` disables reuse. If the database goes down, queries keep working and the failure only shows up in the log.
 
-O pgAdmin (`http://localhost:5050`) sobe junto, na rede `rpa-network`, com o servidor `observa` (`postgres:5432`) já cadastrado; na primeira conexão ele pede a senha `POSTGRES_PASSWORD` (padrão `observa`). A porta só abre em `127.0.0.1`, por isso ele roda sem tela de login.
+pgAdmin (`http://localhost:5050`) starts alongside, on the `rpa-network` network, with the `observa` server (`postgres:5432`) already registered; on the first connection it asks for the `POSTGRES_PASSWORD` password (default `observa`). The port only opens on `127.0.0.1`, so it runs without a login screen.
 
 | Route | What it does |
 |---|---|
 | `GET /consultas?limite=20&busca=maria` | Lists the most recent queries (summary), with an optional filter by term or name |
 | `GET /consultas/{consulta_id}` | Returns the full JSON of a stored query |
 
-Both routes use the same `X-API-Key` and respond with `503` and `HISTORICO_DESATIVADO` when `DATABASE_URL` is empty. In the front end, card **03 · Previous queries** (*Consultas anteriores*) lists the history; clicking an item reopens the result, with evidence, JSON download and export to Google.
+Both routes use the same `X-API-Key` and respond with `503` and `HISTORICO_DESATIVADO` when `DATABASE_URL` is empty. In the front end, card **04 · Previous queries** (*Consultas anteriores*) lists the history; clicking an item reopens the result, with evidence, JSON download and export to Google.
 
 ```bash
 docker compose exec postgres psql -U observa -c "SELECT consultado_em, termo, nome, status FROM consultas ORDER BY consultado_em DESC LIMIT 10"
@@ -279,11 +350,11 @@ You don't need to create a `.venv` or install dependencies: `run.py` uses only t
 
 | Command | What it does |
 |---|---|
-| `python run.py` | API e n8n em contêineres |
-| `python run.py --no-build` | Sobe sem reconstruir a imagem |
-| `python run.py --no-browser` | Não abre o navegador |
-| `python run.py --local` | API no Python local; n8n, PostgreSQL e pgAdmin em contêiner |
-| `python run.py down` | Remove os contêineres (os volumes são mantidos) |
+| `python run.py` | API and n8n in containers |
+| `python run.py --no-build` | starts without rebuilding the image |
+| `python run.py --no-browser` | doesn't open the browser |
+| `python run.py --local` | API on local Python; n8n, PostgreSQL and pgAdmin in containers |
+| `python run.py down` | removes the containers (volumes are kept) |
 
 The `--local` mode is for developing without rebuilding the image after every change. It requires the environment from the [Run locally](#run-locally) section with `.venv` active, installs Chromium into `.browsers` if it's missing and points n8n to `http://host.docker.internal:8000`. If n8n can't reach the API, use `python run.py --local --host 0.0.0.0` with `REQUIRE_API_KEY=true`, since this makes the API visible on the local network.
 
@@ -297,7 +368,7 @@ docker compose up --build
 
 The image includes Python, Chromium and Playwright's system dependencies.
 
-O mesmo `compose.yaml` sobe quatro contêineres na rede `rpa-network`:
+The same `compose.yaml` starts four containers on the `rpa-network` network:
 
 | Service | Address on your computer | Address inside the network |
 |---|---|---|
@@ -315,6 +386,8 @@ docker compose exec n8n n8n import:workflow --input=/workflows/n8n-consulta-goog
 ```
 
 The **Entrada** node uses `RPA_API_URL` (`http://api:8000` in the compose file) and, without that variable, the public API. n8n data and credentials live in the `n8n-data` volume. In Google Cloud, register the OAuth redirect URL `http://localhost:5678/rest/oauth2-credential/callback`.
+
+<img src="assets/divider.svg" alt="" width="100%">
 
 ## Access keys
 
@@ -413,6 +486,8 @@ docker compose exec api sh -c 'test -n "$PORTAL_API_KEY" && echo definida || ech
 | `LIMITE_API_EXCEDIDO` (429) | the key's per-minute limit was reached | wait a minute; lower `PORTAL_API_MAX_RPM` and `MAX_CONCURRENT`; run large loads overnight |
 | name returns `PORTAL_BLOQUEADO` | search by name uses the website, which has a CAPTCHA | query by CPF/NIS, or enable the [assisted mode](#assisted-mode-a-person-solves-the-verification) |
 
+<img src="assets/divider.svg" alt="" width="100%">
+
 ## Result contract
 
 | Field | Content |
@@ -455,6 +530,8 @@ With `PORTAL_API_KEY` filled in (a free key from the gov.br registration at [por
 The project limits calls to `PORTAL_API_MAX_RPM` per minute. When the API responds with HTTP 429, it waits and retries twice; if the limit persists, it returns `codigo=LIMITE_API_EXCEDIDO` with HTTP 429. A rejected key produces `CHAVE_PORTAL_INVALIDA`.
 
 The selectors and extraction were validated against the real layout in an authorized session. The automated suite uses real Chromium and deterministic local pages, without sending CPFs or names to the government.
+
+<img src="assets/divider.svg" alt="" width="100%">
 
 ## Bonus: n8n, Drive and Sheets
 
@@ -517,6 +594,8 @@ Don't change `"active"` to `true` in the JSON: the flow would be imported active
 Editing the JSON in the folder doesn't update the flow that is already in n8n. Since the file has no fixed id, importing again creates a copy. `python run.py down` preserves the `n8n-data` volume, but `docker compose down -v` deletes the flow and the credentials.
 
 Integration details are in [docs/bonus-google.md](docs/bonus-google.md).
+
+<img src="assets/divider.svg" alt="" width="100%">
 
 ## Tests
 
@@ -586,10 +665,19 @@ app/
   extraction.py       reading the overview, tables and benefits
   models.py           result contract
   cli.py              command-line execution
+assets/               logo, animated banner and screenshots used in this README
 tests/                unit and Chromium integration tests
 workflows/            importable n8n workflow
 scripts/              diagnostics, workflow validation and chat_ollama.py
 docs/                 MCP tools (mcp.md), chat (chat.md), bonus architecture, deployment and technical report
 ```
 
-Query data, screenshots, tokens and local variables are ignored by Git through `.gitignore`. The application does not log the content of responses.**
+Query data, screenshots, tokens and local variables are ignored by Git through `.gitignore`. The application does not log the content of responses. The images in this README live in [`assets/`](assets).
+
+<img src="assets/divider.svg" alt="" width="100%">
+
+<div align="center">
+  <img src="assets/logo.svg" alt="observa" width="160">
+  <br>
+  <sub>Public data, with evidence · built on the open-data files of the <a href="https://portaldatransparencia.gov.br">Portal da Transparência</a></sub>
+</div>
