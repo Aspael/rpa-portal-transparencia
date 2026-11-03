@@ -9,3 +9,4 @@ google-api-python-client==2.200.0
 google-auth-oauthlib==1.4.1
 psycopg[binary]==3.3.6
 sqlalchemy[asyncio]==2.1.6
+mcp==2.3.0

@@ -1,5 +1,36 @@
+# Observa — Bolsa Família data from Brazil's Transparency Portal
 
-> **Before you start: the two keys in `.env`**
+**Observa** looks up who received payments from **Bolsa Família**, Brazil's federal cash-transfer program for low-income families, and from related social programs. The data comes from the **Portal da Transparência**, the Brazilian federal government's transparency portal maintained by the Controladoria-Geral da União (CGU, the federal comptroller's office). Observa returns everything as structured JSON through an API, a web front end and an MCP tool, and keeps a history of queries in PostgreSQL.
+
+## What the data is
+
+Bolsa Família pays a monthly benefit to families registered in the government's social registry (Cadastro Único). It started in 2003, was replaced by **Auxílio Brasil** from November 2021 to early 2023, and came back as the **Novo Bolsa Família** in 2023. Because these are public funds, the CGU publishes every payment: one row per installment, with the month, state, municipality, the beneficiary's name, NIS (social identification number) and amount. The CPF (individual taxpayer number) is published **masked** (`***.123.456-**`) to protect the beneficiary.
+
+Observa covers these programs:
+
+| Program | Period | Observa name |
+|---|---|---|
+| Novo Bolsa Família | 2023 onwards | `novo-bolsa-familia` |
+| Bolsa Família (original) | until 2021 | `bolsa-familia-pagamentos` |
+| Auxílio Brasil | Nov 2021 – early 2023 | `auxilio-brasil` |
+| Auxílio Emergencial (COVID-19 emergency aid) | 2020 – 2021 | `auxilio-emergencial` |
+| BPC: Benefício de Prestação Continuada (continuous cash benefit for older people and people with disabilities) | current | `bpc` |
+
+A query takes a **full name or NIS** and returns the person (name, masked CPF, NIS, municipality/state), a summary (programs, number of installments, total amount) and, for each program, the installments grouped by month.
+
+## Where the data comes from
+
+Observa can get the data in three ways, chosen with `QUERY_SOURCE`:
+
+| `QUERY_SOURCE` | Source | Contacts the government during a query? | Search by |
+|---|---|---|---|
+| `dados_abertos` (default) | the portal's **monthly open-data files** (CSV inside ZIP), imported once into PostgreSQL | no | full name or NIS |
+| `api` / `auto` | the portal's official **Data API** (needs a free gov.br key) | yes | CPF or NIS (`auto` sends names to the robot) |
+| `site` | a **Playwright robot** that browses the portal's website and takes a screenshot as evidence | yes, and the site may show a CAPTCHA | name, CPF or NIS |
+
+The default needs no key and never hits a CAPTCHA: the files are downloaded and imported beforehand (see [Data source: local open data](#data-source-local-open-data-default)), and each query is a local SQL lookup. The robot and the Data API are kept for when you need live data or a screenshot.
+
+> **Keys in `.env`.** The default mode only needs `API_KEY` if you want to protect your own API. `PORTAL_API_KEY` is used only by the `api`/`auto` modes.
 >
 > | Variable | What it is | Format | Where to put it |
 > |---|---|---|---|
@@ -19,19 +50,19 @@
 
 | Component | Implementation |
 |---|---|
-| Automação | Python + Playwright controlando o portal oficial |
-| Execução | Chromium headless, contexto isolado e concorrência configurável |
-| Coleta | Panorama da pessoa e detalhes de Auxílio Brasil, Auxílio Emergencial e Bolsa Família |
-| Evidência | Screenshot PNG codificado em Base64 dentro do JSON |
-| API | FastAPI, OpenAPI/Swagger, autenticação por `X-API-Key` e HTTPS |
-| MCP | Servidor MCP em `/mcp` (Streamable HTTP) com a tool `consultar_pessoa`, no mesmo processo da API |
-| Modelo local | Ollama como LLM local, conectado ao robô pelo MCP |
-| Hiperautomação | n8n com nós oficiais Google Drive e Google Sheets |
-| Implantação | Docker em VPS, disponível por HTTPS em domínio neutro |
-| Histórico | PostgreSQL via SQLAlchemy (ORM): grava consultas com sucesso e as reaproveita na próxima busca; pgAdmin para inspecionar |
-| Testes | 39 testes automatizados e validação estrutural do workflow n8n |
+| Data source | Open-data files of the Portal da Transparência imported into PostgreSQL (default); official Data API; Playwright robot on the website |
+| Import | `python -m app.importar_dados`: downloads the monthly ZIP, filters by state if asked and loads it with PostgreSQL `COPY` |
+| Collection | Person overview and installments of Novo Bolsa Família, Bolsa Família, Auxílio Brasil, Auxílio Emergencial and BPC |
+| Evidence | Link to the official file of each month; PNG screenshot in Base64 when the robot is used |
+| API | FastAPI with OpenAPI/Swagger, `X-API-Key` authentication and HTTPS |
+| MCP | MCP server at `/mcp` (Streamable HTTP) with the `consultar_pessoa` tool, in the same process as the API |
+| Local model | Ollama as a local LLM, connected through MCP |
+| Hyperautomation | n8n with the official Google Drive and Google Sheets nodes |
+| Deployment | Docker on a VPS, served over HTTPS on a neutral domain |
+| History | PostgreSQL via SQLAlchemy (ORM): stores successful queries and reuses them on the next search; pgAdmin to inspect |
+| Tests | 59 automated tests (including PostgreSQL integration) and structural validation of the n8n workflow |
 
-Links da aplicação:
+Application links:
 
 - API: [https://python-rpa-9f3d.72-60-12-215.sslip.io](https://python-rpa-9f3d.72-60-12-215.sslip.io)
 - Swagger: [https://python-rpa-9f3d.72-60-12-215.sslip.io/docs](https://python-rpa-9f3d.72-60-12-215.sslip.io/docs)
@@ -44,24 +75,51 @@ The query endpoints require a key in the `X-API-Key` header. The evaluation key 
 
 ```mermaid
 flowchart LR
-    A[Input: name, CPF or NIS] --> B[FastAPI API]
+    P[Portal da Transparência: monthly open-data ZIP] -->|app.importar_dados| DB[(PostgreSQL: pagamentos)]
+    A[Input: full name or NIS] --> B[FastAPI API]
     O[Ollama: local model] <--> H[MCP client]
     H --> N[MCP server /mcp]
     N --> B
-    B --> C[Headless Playwright]
-    C --> D[Portal da Transparência]
-    D --> E[Overview + benefits + screenshot]
+    B -->|SQL lookup| DB
+    B --> E[Person + programs + installments]
     E --> F[Structured JSON]
     F --> G[n8n]
     G --> H2[Google Drive: JSON file]
     H2 --> I[Google Sheets: record and link]
 ```
 
-The robot opens the portal's home page, navigates to the people search, enters the term and the social filter, picks the first result and collects the overview. It then opens the details of the benefits required by the assignment, walks through the pagination and returns a single JSON document.
+In the default mode, the import step runs ahead of time and each query only reads PostgreSQL: it finds the person by NIS or by full name (case and accents ignored), gathers their installments, groups them by program and month and returns a single JSON document. Successful results are also saved in the query history, so repeating a search answers straight from it.
 
-Each query creates a separate browser context. A semaphore limits the number of simultaneous browsers without sharing cookies, pages or data between executions.
+With `QUERY_SOURCE=site`, the robot opens the portal's home page, navigates to the people search, enters the term and the social filter, picks the first result and collects the overview. It then opens the benefit details, walks through the pagination and returns the same JSON contract plus a screenshot. Each query creates a separate browser context, and a semaphore limits the number of simultaneous browsers.
 
-The MCP server runs in the same process as the API and calls the same robot, so the semaphore also applies to queries made through MCP. Ollama does not speak MCP by itself: the model decides when to call the tool (tool calling) and an MCP client, which can be the `scripts/chat_ollama.py` script or an n8n agent, performs the call to `/mcp` and returns the result to the model.
+The MCP server runs in the same process as the API and calls the same data source. Ollama does not speak MCP by itself: the model decides when to call the tool (tool calling) and an MCP client, which can be the `scripts/chat_ollama.py` script or an n8n agent, performs the call to `/mcp` and returns the result to the model.
+
+## Data source: local open data (default)
+
+By default (`QUERY_SOURCE=dados_abertos`) Observa **does not access the government website or API when answering a query**. It searches a local base in PostgreSQL built from the monthly open-data files of the Portal da Transparência ([download-de-dados](https://portaldatransparencia.gov.br/download-de-dados)). There is no CAPTCHA, no key and no rate limit; Playwright is not even started in this mode.
+
+Import one month of a program before querying (inside Docker, `DATABASE_URL` is already set):
+
+```bash
+docker compose exec api python -m app.importar_dados novo-bolsa-familia 202501 --uf AM
+docker compose exec api python -m app.importar_dados --listar
+```
+
+| Program (`programa`) | Content |
+|---|---|
+| `novo-bolsa-familia` | Novo Bolsa Família payments (2023 onwards) |
+| `bolsa-familia-pagamentos` | Bolsa Família payments (until 2021) |
+| `auxilio-brasil` | Auxílio Brasil payments (2021–2023) |
+| `auxilio-emergencial` | Auxílio Emergencial (2020–2021) |
+| `bpc` | Benefício de Prestação Continuada |
+
+- The ZIP is downloaded once to `DADOS_ABERTOS_DIR` and reused; `--baixar-de-novo` forces a new download. Importing the same program and month again replaces the previous rows.
+- A full month of Bolsa Família is ~360 MB zipped and ~20 million rows. Use `--uf` to keep a single state (and `--limite N` for quick tests).
+- Search by **full name** (case and accents ignored) or **NIS**. In these files the CPF is published masked (`***.123.456-**`), so a CPF only works when its middle digits match a single person; otherwise the answer is `CPF_AMBIGUO` (HTTP 422).
+- The result keeps the same contract, with `modo_execucao=dados_abertos`: one benefit per program and one page per imported month, without a screenshot. `pessoa.panorama.campos["Meses na base local"]` says which months were searched.
+- Errors: `BASE_VAZIA` (nothing imported yet), `BASE_LOCAL_DESATIVADA` (no `DATABASE_URL`), `BASE_LOCAL_INDISPONIVEL` (PostgreSQL unreachable), all HTTP 503.
+
+The robot (website) and the official Data API are still available with `QUERY_SOURCE=auto`, `api` or `site`, described below.
 
 ## Run locally
 
@@ -458,6 +516,8 @@ node scripts/verify_workflow.cjs
 
 The suite covers input and authentication, search by name/document, social filter, first result, three benefits, pagination, Base64 screenshot, no results, WAF blocking, timeout, partial collection, API, isolation of concurrent queries and simulated Google integration.
 
+`tests/test_dados_abertos.py` covers the open-data layer: parsing of the official CSV layouts (including masked CPFs and minors without an identifiable holder), the API using the local base without starting the robot, and, when `TEST_DATABASE_URL` is set, a real import into PostgreSQL followed by searches by name and NIS.
+
 The Node script validates connections, scripts, JSON file generation, the presence of the official Drive/Sheets nodes, the mapping of the seven columns and the absence of credentials in the versioned artifact.
 
 The MCP tests (`tests/test_mcp.py`) verify that the `consultar_pessoa` tool is listed, that a call without `X-API-Key` is rejected, that evidence is only returned when requested and that `status` is preserved. The robot is mocked, with no access to the portal and no dependency on Ollama.
@@ -476,7 +536,8 @@ The MCP tests (`tests/test_mcp.py`) verify that the `consultar_pessoa` tool is l
 | `REQUIRE_API_KEY` | `false` | prevents starting without a key when enabled |
 | `PORTAL_API_KEY` | empty | gov.br Data API key; with it, CPF/NIS queries use the official API instead of the website |
 | `PORTAL_API_MAX_RPM` | `80` | cap on requests per minute to the Data API (official limit: 90/min by day, 300/min overnight) |
-| `QUERY_SOURCE` | `auto` | `auto`: CPF/NIS via Data API when the key exists, name via website; `api`: never opens the website (CPF/NIS only); `site`: always the robot |
+| `QUERY_SOURCE` | `dados_abertos` | `dados_abertos`: local PostgreSQL base imported with `app.importar_dados`, never contacts the government; `auto`: CPF/NIS via Data API when the key exists, name via website; `api`: never opens the website (CPF/NIS only); `site`: always the robot |
+| `DADOS_ABERTOS_DIR` | `outputs/dados-abertos` | where the importer keeps the downloaded ZIP files |
 | `ASSISTED_MODE` | `false` | on a CAPTCHA, repeats the query in a visible window for a person to solve the verification (needs a screen) |
 | `ASSISTED_WAIT_SECONDS` | `180` | how long the assisted mode waits for the verification to be completed |
 | `MCP_ENABLED` | `true` | enables the `/mcp` endpoint |
@@ -491,8 +552,11 @@ The public deployment uses `REQUIRE_API_KEY=true`, HTTPS and a single worker. Co
 
 ```text
 app/
-  api.py              API and OpenAPI (mounts MCP at /mcp)
-  mcp_server.py       MCP server and the consultar_pessoa tool
+  api.py              API and OpenAPI; picks the data source (QUERY_SOURCE)
+  dados_abertos.py    local open-data source: tables and queries by name or NIS
+  importar_dados.py   downloads and imports the monthly open-data files
+  history.py          query history in PostgreSQL
+  portal_api.py       official Data API client (CPF/NIS)
   robot.py            browser lifecycle and navigation
   extraction.py       reading the overview, tables and benefits
   models.py           result contract

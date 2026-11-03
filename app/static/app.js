@@ -113,7 +113,7 @@ function historyRow(item) {
   when.textContent = new Date(item.consultado_em).toLocaleString('pt-BR', {dateStyle: 'short', timeStyle: 'short'});
   const who = document.createElement('strong'); who.textContent = item.nome || item.termo;
   const details = document.createElement('small');
-  details.textContent = `${{api_oficial: 'API oficial', assistido: 'Assistido'}[item.modo_execucao] || 'Robô'} · ${item.beneficios} benefício(s)`;
+  details.textContent = `${{api_oficial: 'API oficial', assistido: 'Assistido', dados_abertos: 'Dados abertos'}[item.modo_execucao] || 'Robô'} · ${item.beneficios} benefício(s)`;
   const state = document.createElement('span'); state.className = `badge ${item.status}`;
   state.textContent = {sucesso: 'Concluída', parcial: 'Parcial', erro: 'Falha'}[item.status] || item.status;
   button.append(when, who, details, state);

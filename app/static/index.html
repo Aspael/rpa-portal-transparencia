@@ -10,7 +10,7 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-<header><a class="brand" href="/">◉ <span>observa</span></a><span class="header-note">Portal da Transparência · RPA</span><a href="/docs">API / Swagger ↗</a></header>
+<header><a class="brand" href="/">◉ <span>observa</span></a><span class="header-note">Portal da Transparência · Dados abertos</span><a href="/docs">API / Swagger ↗</a></header>
 <main>
   <section class="intro"><p class="eyebrow">DADOS PÚBLICOS, COM EVIDÊNCIA</p><h1>Uma consulta.<br>Todo o panorama.</h1><p>Consulte pessoas físicas, acompanhe os benefícios e exporte os dados com a captura da fonte.</p></section>
   <div class="workspace">
@@ -19,12 +19,12 @@
       <form id="query-form">
         <label for="term">Nome, CPF ou NIS</label>
         <input id="term" name="termo" placeholder="Digite um nome ou documento" required minlength="2" maxlength="160" autocomplete="off">
-        <p class="hint">Retorna a primeira pessoa física encontrada no portal.</p>
+        <p class="hint">Busca na base local de dados abertos: nome completo ou NIS. O CPF é publicado mascarado nos arquivos do governo.</p>
         <label class="check"><input id="social" type="checkbox"><span>Apenas beneficiários de programa social</span></label>
         <details class="access"><summary>Chave de acesso da API</summary><label for="api-key">X-API-Key</label><input id="api-key" type="password" placeholder="Opcional: usa o API_KEY do .env" autocomplete="off"><p class="hint">Vazio usa a chave do .env do servidor. Preenchido, substitui essa chave só nesta página; não é salvo no navegador.</p></details>
-        <button id="submit" type="submit">Consultar portal <span>↗</span></button>
+        <button id="submit" type="submit">Consultar <span>↗</span></button>
       </form>
-      <div class="note"><span class="dot"></span><p>Consulta à fonte oficial. Bloqueios e resultados incompletos são identificados na resposta.</p></div>
+      <div class="note"><span class="dot"></span><p>Consulta os arquivos oficiais já importados no PostgreSQL, sem acessar o site do governo.</p></div>
     </section>
     <section class="card results-card" aria-labelledby="result-title">
       <div class="section-title"><span class="step">02</span><h2 id="result-title">Resultado da consulta</h2><span id="status" class="badge">Aguardando</span></div>

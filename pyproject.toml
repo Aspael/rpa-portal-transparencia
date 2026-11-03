@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "transparencia-rpa"
 version = "1.0.0"
-description = "Robô assíncrono de consulta ao Portal da Transparência"
+description = "Consulta de pagamentos do Bolsa Família e programas relacionados no Portal da Transparência"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi==0.141.1", "uvicorn==0.54.0", "playwright==1.63.0",
   "pydantic-settings==2.15.0",
   "httpx==0.28.1", "filelock==4.0.3",
   "google-api-python-client==2.200.0", "google-auth-oauthlib==1.4.1",
-  "psycopg[binary]==3.3.6", "sqlalchemy[asyncio]==2.1.6",
+  "psycopg[binary]==3.3.6", "sqlalchemy[asyncio]==2.1.6", "mcp==2.3.0",
 ]
 
 [project.optional-dependencies]
