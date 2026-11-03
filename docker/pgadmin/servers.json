@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "observa",
+      "Group": "rpa-network",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "observa",
+      "Username": "observa",
+      "SSLMode": "prefer"
+    }
+  }
+}

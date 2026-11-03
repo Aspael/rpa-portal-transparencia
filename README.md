@@ -19,19 +19,19 @@
 
 | Component | Implementation |
 |---|---|
-| Automation | Python + Playwright driving the official portal |
-| Execution | Headless Chromium, isolated context and configurable concurrency |
-| Data collection | Person overview and details of Auxílio Brasil, Auxílio Emergencial and Bolsa Família |
-| Evidence | PNG screenshot encoded as Base64 inside the JSON |
-| API | FastAPI, OpenAPI/Swagger, `X-API-Key` authentication and HTTPS |
-| MCP | MCP server at `/mcp` (Streamable HTTP) with the `consultar_pessoa` tool, in the same process as the API |
-| Local model | Ollama as a local LLM, connected to the robot through MCP |
-| Hyperautomation | n8n with the official Google Drive and Google Sheets nodes |
-| Deployment | Docker on a VPS, available over HTTPS on a neutral domain |
-| History | PostgreSQL with every query, listed and reopened from the front end |
-| Tests | 39 automated tests and structural validation of the n8n workflow |
+| Automação | Python + Playwright controlando o portal oficial |
+| Execução | Chromium headless, contexto isolado e concorrência configurável |
+| Coleta | Panorama da pessoa e detalhes de Auxílio Brasil, Auxílio Emergencial e Bolsa Família |
+| Evidência | Screenshot PNG codificado em Base64 dentro do JSON |
+| API | FastAPI, OpenAPI/Swagger, autenticação por `X-API-Key` e HTTPS |
+| MCP | Servidor MCP em `/mcp` (Streamable HTTP) com a tool `consultar_pessoa`, no mesmo processo da API |
+| Modelo local | Ollama como LLM local, conectado ao robô pelo MCP |
+| Hiperautomação | n8n com nós oficiais Google Drive e Google Sheets |
+| Implantação | Docker em VPS, disponível por HTTPS em domínio neutro |
+| Histórico | PostgreSQL via SQLAlchemy (ORM): grava consultas com sucesso e as reaproveita na próxima busca; pgAdmin para inspecionar |
+| Testes | 39 testes automatizados e validação estrutural do workflow n8n |
 
-Application links:
+Links da aplicação:
 
 - API: [https://python-rpa-9f3d.72-60-12-215.sslip.io](https://python-rpa-9f3d.72-60-12-215.sslip.io)
 - Swagger: [https://python-rpa-9f3d.72-60-12-215.sslip.io/docs](https://python-rpa-9f3d.72-60-12-215.sslip.io/docs)
@@ -117,7 +117,17 @@ curl -X POST http://127.0.0.1:8000/consultas \
 
 ### History in PostgreSQL
 
-With `DATABASE_URL` set, every `POST /consultas` response (success, partial or error) is written to the `consultas` table, which is created automatically on first use. The full JSON is stored in the `resultado` column (`jsonb`), while the term, name, CPF, NIS, status and date have their own columns for filtering. If the database goes down, queries keep responding normally and the failure only shows up in the log.
+Com `DATABASE_URL` definido, o histórico usa SQLAlchemy (ORM assíncrono, modelo `Consulta` em `app/history.py`) sobre a tabela `consultas`, criada automaticamente no primeiro uso. O JSON completo fica na coluna `resultado` (`jsonb`), e termo, nome, CPF, NIS, status e data ficam em colunas próprias para filtro.
+
+Fluxo de `POST /consultas`:
+
+1. **SELECT**: procura no PostgreSQL um resultado com sucesso para o mesmo termo (sem diferenciar maiúsculas) e o mesmo filtro de programa social, gravado nas últimas `HISTORY_CACHE_HOURS` horas (padrão 24). Se achar, devolve esse resultado com `"origem": "historico"`, sem ir ao portal.
+2. Senão, consulta o portal (`"origem": "portal"`).
+3. **INSERT**: só resultados com `status: "sucesso"` são gravados; parcial e erro não entram no histórico, e a próxima tentativa volta ao portal.
+
+Envie `"atualizar": true` no corpo para ignorar o histórico e forçar nova consulta; `HISTORY_CACHE_HOURS=0` desativa o reaproveitamento. Se o banco cair, a consulta continua respondendo normalmente e a falha aparece só no log.
+
+O pgAdmin (`http://localhost:5050`) sobe junto, na rede `rpa-network`, com o servidor `observa` (`postgres:5432`) já cadastrado; na primeira conexão ele pede a senha `POSTGRES_PASSWORD` (padrão `observa`). A porta só abre em `127.0.0.1`, por isso ele roda sem tela de login.
 
 | Route | What it does |
 |---|---|
@@ -198,11 +208,11 @@ You don't need to create a `.venv` or install dependencies: `run.py` uses only t
 
 | Command | What it does |
 |---|---|
-| `python run.py` | API and n8n in containers |
-| `python run.py --no-build` | Starts without rebuilding the image |
-| `python run.py --no-browser` | Doesn't open the browser |
-| `python run.py --local` | API on local Python; n8n and PostgreSQL in containers |
-| `python run.py down` | Removes the containers (volumes are kept) |
+| `python run.py` | API e n8n em contêineres |
+| `python run.py --no-build` | Sobe sem reconstruir a imagem |
+| `python run.py --no-browser` | Não abre o navegador |
+| `python run.py --local` | API no Python local; n8n, PostgreSQL e pgAdmin em contêiner |
+| `python run.py down` | Remove os contêineres (os volumes são mantidos) |
 
 The `--local` mode is for developing without rebuilding the image after every change. It requires the environment from the [Run locally](#run-locally) section with `.venv` active, installs Chromium into `.browsers` if it's missing and points n8n to `http://host.docker.internal:8000`. If n8n can't reach the API, use `python run.py --local --host 0.0.0.0` with `REQUIRE_API_KEY=true`, since this makes the API visible on the local network.
 
@@ -216,13 +226,14 @@ docker compose up --build
 
 The image includes Python, Chromium and Playwright's system dependencies.
 
-The same `compose.yaml` starts three containers on the `rpa-network` network:
+O mesmo `compose.yaml` sobe quatro contêineres na rede `rpa-network`:
 
 | Service | Address on your computer | Address inside the network |
 |---|---|---|
 | `api` | `http://127.0.0.1:8000` | `http://api:8000` |
 | `n8n` | `http://localhost:5678` | `http://n8n:5678` |
 | `postgres` | `127.0.0.1:5432` | `postgres:5432` |
+| `pgadmin` | `http://localhost:5050` | `http://pgadmin:80` |
 
 PostgreSQL stores the [query history](#history-in-postgresql) in the `postgres-data` volume; user, password and database come from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB` (default `observa`).
 

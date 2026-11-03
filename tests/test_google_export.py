@@ -71,7 +71,7 @@ def test_export_contains_full_json_and_raw_sheet_values(exporter):
     service, memory = exporter
     result = Result(codigo="PORTAL_BLOQUEADO")
     receipt = service.export(result)
-    assert memory.payload == result.model_dump(mode="json")
+    assert memory.payload == result.model_dump(mode="json", exclude={"origem"})
     assert receipt.arquivo_nome.startswith(result.consulta_id + "_")
     assert receipt.arquivo_nome.endswith(".json")
     assert memory.rows[1][0] == result.consulta_id

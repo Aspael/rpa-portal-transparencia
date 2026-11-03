@@ -62,6 +62,11 @@ class StubHistory:
     async def save(self, query, result):
         self.saved.append((query, result))
 
+    async def find(self, query):
+        return next((result.model_copy(update={"origem": "historico"}) for saved, result in reversed(self.saved)
+                     if (saved.termo.lower(), saved.beneficiario_programa_social) == (query.termo.lower(), query.beneficiario_programa_social)),
+                    None)
+
     async def list(self, limit, search=None):
         return [HistoryItem(consulta_id=result.consulta_id, consultado_em=result.consultado_em, termo=query.termo,
                             modo_execucao=result.modo_execucao, status=result.status, codigo=result.codigo)
@@ -71,9 +76,21 @@ class StubHistory:
         return next((result for _, result in self.saved if result.consulta_id == str(consulta_id)), None)
 
 
+class SuccessRobot(StubRobot):
+    """Sucesso para qualquer termo, exceto "Inexistente"; conta as idas ao portal."""
+    def __init__(self, settings):
+        self.calls = []
+
+    async def query(self, query):
+        self.calls.append(query.termo)
+        if query.termo == "Inexistente":
+            return Result(codigo="NAO_ENCONTRADO", mensagem="Nenhum registro")
+        return Result(status="sucesso", mensagem=f"Dados de {query.termo}")
+
+
 def test_history_saves_lists_and_reopens_queries():
     settings = Settings(api_key="test-key", database_url="postgresql://stub")
-    with TestClient(create_app(settings, StubRobot, history_factory=StubHistory)) as client:
+    with TestClient(create_app(settings, SuccessRobot, history_factory=StubHistory)) as client:
         headers = {"X-API-Key": "test-key"}
         assert client.get("/consultas").status_code == 401
         consulta_id = client.post("/consultas", json={"termo": "Teste"}, headers=headers).json()["consulta_id"]
@@ -84,9 +101,34 @@ def test_history_saves_lists_and_reopens_queries():
         assert client.get("/consultas?limite=0", headers=headers).status_code == 422
         response = client.get(f"/consultas/{consulta_id}", headers=headers)
         assert response.status_code == 200
-        assert response.json()["codigo"] == "NAO_ENCONTRADO"
+        assert response.json()["mensagem"] == "Dados de Teste"
         assert client.get(f"/consultas/{uuid4()}", headers=headers).status_code == 404
         assert client.get("/consultas/nao-e-uuid", headers=headers).status_code == 422
+
+
+def test_success_is_inserted_and_reused_from_history():
+    settings = Settings(database_url="postgresql://stub")
+    with TestClient(create_app(settings, SuccessRobot, history_factory=StubHistory)) as client:
+        robot, store = client.app.state.robot, client.app.state.history
+        first = client.post("/consultas", json={"termo": "Maria"}).json()
+        assert first["origem"] == "portal"
+
+        # Mesmo termo: SELECT no histórico, sem nova ida ao portal.
+        again = client.post("/consultas", json={"termo": "  maria "}).json()
+        assert (again["origem"], again["consulta_id"]) == ("historico", first["consulta_id"])
+        assert robot.calls == ["Maria"]
+
+        # Filtro diferente ou "atualizar" vão ao portal e gravam um novo resultado.
+        client.post("/consultas", json={"termo": "Maria", "beneficiario_programa_social": True})
+        refreshed = client.post("/consultas", json={"termo": "Maria", "atualizar": True}).json()
+        assert refreshed["origem"] == "portal" and refreshed["consulta_id"] != first["consulta_id"]
+        assert robot.calls == ["Maria"] * 3
+
+        # Falha não é gravada, então a próxima tentativa volta ao portal.
+        assert client.post("/consultas", json={"termo": "Inexistente"}).status_code == 404
+        assert client.post("/consultas", json={"termo": "Inexistente"}).status_code == 404
+        assert robot.calls[-2:] == ["Inexistente", "Inexistente"]
+        assert all(result.status == "sucesso" for _, result in store.saved) and len(store.saved) == 3
 
 
 def test_history_disabled_and_database_failure():
@@ -96,6 +138,9 @@ def test_history_disabled_and_database_failure():
         assert response.json()["codigo"] == "HISTORICO_DESATIVADO"
 
     class BrokenHistory(StubHistory):
+        async def find(self, query):
+            raise ConnectionError("banco fora do ar")
+
         async def save(self, query, result):
             raise ConnectionError("banco fora do ar")
 

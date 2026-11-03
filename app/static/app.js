@@ -13,7 +13,9 @@ function render(result) {
   $('export-status').hidden = true;
   $('result').hidden = false;
   setStatus({sucesso: 'Concluída', parcial: 'Parcial', erro: 'Falha'}[result.status] || 'Resposta', result.status);
-  $('message').textContent = result.mensagem || 'Consulta concluída. Os dados e a evidência estão disponíveis abaixo.';
+  $('message').textContent = result.origem === 'historico'
+    ? `Resultado recuperado do histórico (PostgreSQL), consultado em ${new Date(result.consultado_em).toLocaleString('pt-BR', {dateStyle: 'short', timeStyle: 'short'})}.`
+    : result.mensagem || 'Consulta concluída. Os dados e a evidência estão disponíveis abaixo.';
   $('person').replaceChildren();
   if (result.pessoa) {
     for (const [field, label] of Object.entries({nome: 'Nome', cpf: 'CPF', nis: 'NIS', localidade: 'Localidade'})) {

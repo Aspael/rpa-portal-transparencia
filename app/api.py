@@ -88,15 +88,25 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
               responses={404: {"model": Result}, 429: {"model": Result}, 502: {"model": Result}, 504: {"model": Result}},
               tags=["Consultas"])
     async def consult(query: Query, request: Request):
+        store = request.app.state.history
+        # SELECT primeiro: termo já consultado com sucesso volta do PostgreSQL, sem ir ao portal.
+        if store and not query.atualizar:
+            try:
+                cached = await store.find(query)
+            except Exception:
+                log.exception("Não foi possível ler o histórico para o termo consultado")
+                cached = None
+            if cached:
+                return JSONResponse(cached.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
         # CPF/NIS com PORTAL_API_KEY vai pela API de Dados oficial, sem CAPTCHA;
         # busca por nome continua no site, que a API não oferece.
         portal_api = request.app.state.portal_api
         source = portal_api if portal_api and query.is_document else request.app.state.robot
         result = await source.query(query)
-        if request.app.state.history:
-            # Falha no banco não derruba a consulta: o resultado volta ao cliente mesmo assim.
+        if store and result.status == "sucesso":
+            # INSERT só de consultas com sucesso. Falha no banco não derruba a consulta.
             try:
-                await request.app.state.history.save(query, result)
+                await store.save(query, result)
             except Exception:
                 log.exception("Não foi possível gravar a consulta %s no histórico", result.consulta_id)
         status = 200
