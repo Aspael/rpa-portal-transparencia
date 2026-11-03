@@ -66,8 +66,11 @@ def test_lists_tool_and_requires_api_key():
                                           "clientInfo": {"name": "teste", "version": "1"}})
         assert init.status_code == 200 and init.json()["result"]["serverInfo"]["name"] == "observa"
         tools = rpc(client, "tools/list").json()["result"]["tools"]
-        assert [tool["name"] for tool in tools] == ["consultar_pessoa"]
+        assert [tool["name"] for tool in tools] == ["consultar_pessoa", "listar_base_local", "importar_base_local",
+                                                    "status_importacao", "cancelar_importacao"]
         assert {"termo", "beneficiario_programa_social", "incluir_evidencia", "atualizar"} <= tools[0]["inputSchema"]["properties"].keys()
+        assert {"programa", "ano", "mes", "uf", "limite"} <= tools[2]["inputSchema"]["properties"].keys()
+        assert tools[2]["inputSchema"]["required"] == ["programa", "ano"]
         assert rpc(client, "tools/list", headers={"Accept": HEADERS["Accept"]}).status_code == 401
         assert rpc(client, "tools/list", headers={**HEADERS, "X-API-Key": "errada"}).status_code == 401
         assert "/mcp" not in client.get("/openapi.json").json()["paths"]

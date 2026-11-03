@@ -12,6 +12,7 @@ def test_ui_search_error_download_export_and_mobile():
         result = Result(codigo="PORTAL_BLOQUEADO", mensagem="Portal exigiu verificação humana", etapa="acessando_busca", duracao_ms=900)
         previous = Result(status="sucesso", modo_execucao="api_oficial", mensagem="Consulta recuperada do histórico", duracao_ms=300)
         submissions = []
+        imports, imported, task = [], [], {}
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch()
             try:
@@ -30,6 +31,17 @@ def test_ui_search_error_download_export_and_mobile():
                                                                 status="sucesso").model_dump(mode="json")])
                     elif url.endswith(f"/consultas/{previous.consulta_id}"):
                         await request.fulfill(json=previous.model_dump(mode="json"))
+                    elif url.endswith("/base-local"):
+                        await request.fulfill(json={"programas": [], "importados": imported, "tarefa_atual": None,
+                                                    "tarefas": [task] if task else []})
+                    elif url.endswith("/base-local/importacoes") and request.request.method == "POST":
+                        imports.append(request.request.post_data_json)
+                        task.update(tarefa_id="t1", programa_nome="BPC", uf="AM", status="concluida", percentual=None,
+                                    mensagem="1 de 1 mês(es) importado(s), 3 linhas.",
+                                    meses=[{"mes": "202403", "status": "concluido", "linhas": 3, "mensagem": "3 linhas importadas"}])
+                        imported.append({"programa": "bpc", "programa_nome": "BPC", "arquivo_mes": "202403", "uf": "AM",
+                                         "linhas": 3, "importado_em": "2026-01-01T12:00:00Z"})
+                        await request.fulfill(status=202, json=task)
                     elif url.endswith("/integracoes/google/arquivar"):
                         await request.fulfill(status=503, json={"mensagem": "Configure o OAuth Google"})
                     elif url.endswith("/style.css"):
@@ -62,6 +74,16 @@ def test_ui_search_error_download_export_and_mobile():
                 await expect(page.locator("#status")).to_have_text("Concluída")
                 await expect(page.locator("#message")).to_have_text(previous.mensagem)
                 await expect(page.locator(".history-item.active")).to_have_count(1)
+                # Base local: escolher programa, ano, mês e UF e importar.
+                await expect(page.locator("#base-status")).to_contain_text("Nenhum mês importado")
+                await page.get_by_label("Programa", exact=True).select_option("bpc")
+                await page.get_by_label("Ano", exact=True).select_option("2024")
+                await page.get_by_label("Mês", exact=True).select_option("3")
+                await expect(page.get_by_label("UF", exact=True)).to_have_value("AM")
+                await page.get_by_role("button", name="Baixar e importar").click()
+                assert imports == [{"programa": "bpc", "ano": 2024, "mes": 3, "uf": "AM"}]
+                await expect(page.locator("#task-status")).to_have_text("Concluída")
+                await expect(page.locator(".base-item")).to_contain_text("BPC · 03/2024")
                 await page.set_viewport_size({"width": 390, "height": 844})
                 assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
                 await page.screenshot(path=str(output / "mobile.png"), full_page=True)

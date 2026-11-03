@@ -55,12 +55,12 @@ The default needs no key and never hits a CAPTCHA: the files are downloaded and 
 | Collection | Person overview and installments of Novo Bolsa Família, Bolsa Família, Auxílio Brasil, Auxílio Emergencial and BPC |
 | Evidence | Link to the official file of each month; PNG screenshot in Base64 when the robot is used |
 | API | FastAPI with OpenAPI/Swagger, `X-API-Key` authentication and HTTPS |
-| MCP | MCP server at `/mcp` (Streamable HTTP) with the `consultar_pessoa` tool, in the same process as the API |
+| MCP | MCP server at `/mcp` (Streamable HTTP) with tools to query a person and to download/import the local base by year/month, in the same process as the API ([docs/mcp.md](docs/mcp.md)) |
 | Local model | Ollama as a local LLM, connected through MCP |
 | Hyperautomation | n8n with the official Google Drive and Google Sheets nodes |
 | Deployment | Docker on a VPS, served over HTTPS on a neutral domain |
 | History | PostgreSQL via SQLAlchemy (ORM): stores successful queries and reuses them on the next search; pgAdmin to inspect |
-| Tests | 59 automated tests (including PostgreSQL integration) and structural validation of the n8n workflow |
+| Tests | 69 automated tests (including PostgreSQL integration) and structural validation of the n8n workflow |
 
 Application links:
 
@@ -98,7 +98,9 @@ The MCP server runs in the same process as the API and calls the same data sourc
 
 By default (`QUERY_SOURCE=dados_abertos`) Observa **does not access the government website or API when answering a query**. It searches a local base in PostgreSQL built from the monthly open-data files of the Portal da Transparência ([download-de-dados](https://portaldatransparencia.gov.br/download-de-dados)). There is no CAPTCHA, no key and no rate limit; Playwright is not even started in this mode.
 
-Import one month of a program before querying (inside Docker, `DATABASE_URL` is already set):
+Import one month of a program before querying. The easiest way is the **03 · Base local** card in the front end: pick the program, the year, a month (or "Ano inteiro" for the whole year) and a state, then click **Baixar e importar**. The import runs in the background with a progress bar and can be cancelled; the card also lists the imported months and removes them. The same actions are available through the API (`/base-local`, see Swagger) and through MCP tools ([docs/mcp.md](docs/mcp.md)).
+
+From the command line (inside Docker, `DATABASE_URL` is already set):
 
 ```bash
 docker compose exec api python -m app.importar_dados novo-bolsa-familia 202501 --uf AM
@@ -200,11 +202,17 @@ docker compose exec postgres psql -U observa -c "SELECT consultado_em, termo, no
 
 ### MCP
 
-With the API running, the MCP server is available at `http://127.0.0.1:8000/mcp` (Streamable HTTP, stateless), with the `X-API-Key` header. It exposes one tool:
+With the API running, the MCP server is available at `http://127.0.0.1:8000/mcp` (Streamable HTTP, stateless), with the `X-API-Key` header. It exposes these tools (full specification, examples and error codes in [docs/mcp.md](docs/mcp.md)):
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `consultar_pessoa` | `termo`, `beneficiario_programa_social` (default `false`), `incluir_evidencia` (default `false`) | Queries the person and returns the same JSON as the [result contract](#result-contract) |
+| `consultar_pessoa` | `termo`, `beneficiario_programa_social` (default `false`), `incluir_evidencia` (default `false`), `atualizar` (default `false`) | Queries the person and returns the same JSON as the [result contract](#result-contract) |
+| `listar_base_local` | — | Programs, months already imported (program, `AAAAMM`, state, rows) and the running import |
+| `importar_base_local` | `programa`, `ano`, `mes` (omit for the whole year), `uf`, `limite` | Downloads the monthly open-data file(s) and imports them in the background; returns a task |
+| `status_importacao` | `tarefa_id` (optional) | Progress of an import: status, current month, download percentage, result per month |
+| `cancelar_importacao` | `tarefa_id` | Cancels an import; the month in progress is rolled back |
+
+The base-local tools need `DATABASE_URL` and allow one import at a time. Removing a month is only available in the front end and the API (`DELETE /base-local/importacoes/{programa}/{AAAAMM}`), not as an MCP tool.
 
 By default the tool returns `evidencia` as `null`, because the Base64 screenshot takes up a lot of space in a local model's context. Use `incluir_evidencia=true` when you need the image. `status`, `codigo` and `mensagem` are preserved.
 
@@ -520,7 +528,9 @@ The suite covers input and authentication, search by name/document, social filte
 
 The Node script validates connections, scripts, JSON file generation, the presence of the official Drive/Sheets nodes, the mapping of the seven columns and the absence of credentials in the versioned artifact.
 
-The MCP tests (`tests/test_mcp.py`) verify that the `consultar_pessoa` tool is listed, that a call without `X-API-Key` is rejected, that evidence is only returned when requested and that `status` is preserved. The robot is mocked, with no access to the portal and no dependency on Ollama.
+`tests/test_base_local.py` covers importing by year/month through the API and the MCP tools with a fake downloader: request validation, background task with progress, whole-year imports with failed months, one import at a time, cancellation and removal.
+
+The MCP tests (`tests/test_mcp.py`) verify that all tools are listed, that a call without `X-API-Key` is rejected, that evidence is only returned when requested and that `status` is preserved. The robot is mocked, with no access to the portal and no dependency on Ollama.
 
 ## Configuration
 
@@ -554,7 +564,9 @@ The public deployment uses `REQUIRE_API_KEY=true`, HTTPS and a single worker. Co
 app/
   api.py              API and OpenAPI; picks the data source (QUERY_SOURCE)
   dados_abertos.py    local open-data source: tables and queries by name or NIS
-  importar_dados.py   downloads and imports the monthly open-data files
+  importar_dados.py   downloads and imports the monthly open-data files (CLI)
+  base_local.py       background imports by year/month for the API, front end and MCP
+  mcp_server.py       MCP server at /mcp and its tools
   history.py          query history in PostgreSQL
   portal_api.py       official Data API client (CPF/NIS)
   robot.py            browser lifecycle and navigation
@@ -564,7 +576,7 @@ app/
 tests/                unit and Chromium integration tests
 workflows/            importable n8n workflow
 scripts/              diagnostics, workflow validation and chat_ollama.py
-docs/                 bonus architecture, deployment and technical report
+docs/                 MCP tools (mcp.md), bonus architecture, deployment and technical report
 ```
 
 Query data, screenshots, tokens and local variables are ignored by Git through `.gitignore`. The application does not log the content of responses.**

@@ -7,13 +7,15 @@ import html
 import logging
 
 from fastapi import Depends, FastAPI, HTTPException, Query as Param, Request
+from fastapi.encoders import jsonable_encoder as jsonable
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from starlette.routing import Route
 
+from app.base_local import BaseLocal, ImportacaoEmAndamento, PedidoImportacao, Tarefa, valid_month
 from app.config import Settings
-from app.dados_abertos import DadosAbertos
+from app.dados_abertos import PROGRAMAS, DadosAbertos
 from app.history import History
 from app.mcp_server import McpEndpoint, create_mcp
 from app.models import ArchiveRequest, HistoryItem, Query, Result
@@ -25,7 +27,8 @@ log = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_factory=GoogleExporter,
-               portal_api_factory=PortalApi, history_factory=History, local_factory=DadosAbertos) -> FastAPI:
+               portal_api_factory=PortalApi, history_factory=History, local_factory=DadosAbertos,
+               base_local_factory=BaseLocal) -> FastAPI:
     settings = settings or Settings()
 
     @asynccontextmanager
@@ -42,6 +45,7 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
         app.state.portal_api = None
         app.state.history = None
         app.state.dados_abertos = None
+        app.state.base_local = None
         try:
             if not local_mode and settings.portal_api_key and settings.portal_api_key.get_secret_value():
                 app.state.portal_api = portal_api_factory(settings)
@@ -52,11 +56,16 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
             if has_database:
                 app.state.history = history_factory(settings)
                 await app.state.history.start()
+                # Baixar/importar meses pela API e pelo MCP; vale em qualquer QUERY_SOURCE.
+                app.state.base_local = base_local_factory(settings)
+                await app.state.base_local.start()
             # O transporte do MCP precisa do seu gerenciador rodando enquanto a API estiver de pé.
             async with mcp_endpoint.session_manager.run() if mcp_endpoint else nullcontext():
                 yield
         finally:
             try:
+                if app.state.base_local:
+                    await app.state.base_local.close()
                 if app.state.history:
                     await app.state.history.close()
                 if app.state.dados_abertos:
@@ -68,7 +77,8 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
                     await robot.close()
 
     app = FastAPI(title="Observa — Bolsa Família (Portal da Transparência)", version="1.0.0", lifespan=lifespan)
-    mcp_endpoint = McpEndpoint(create_mcp(lambda query: run_query(query)), settings) if settings.mcp_enabled else None
+    mcp_endpoint = (McpEndpoint(create_mcp(lambda query: run_query(query), lambda: app.state.base_local), settings)
+                    if settings.mcp_enabled else None)
     static = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=static), name="static")
 
@@ -202,6 +212,82 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
         if not result:
             raise HTTPException(404, "Consulta não encontrada no histórico")
         return JSONResponse(result.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
+
+    def base_local_or_error(request: Request):
+        manager = request.app.state.base_local
+        if not manager:
+            return None, history_unavailable("BASE_LOCAL_DESATIVADA",
+                                             "Base local desativada: configure DATABASE_URL (PostgreSQL).")
+        return manager, None
+
+    def no_store(data, status_code: int = 200):
+        return JSONResponse(data, status_code=status_code, headers={"Cache-Control": "no-store"})
+
+    @app.get("/base-local", dependencies=[Depends(authorize)], tags=["Base local"],
+             summary="Programas, meses importados e tarefas de importação")
+    async def base_local_summary(request: Request):
+        manager, error = base_local_or_error(request)
+        if error:
+            return error
+        try:
+            return no_store(jsonable(await manager.resumo()))
+        except Exception:
+            log.exception("Falha ao listar a base local")
+            return history_unavailable("BASE_LOCAL_INDISPONIVEL", "Não foi possível acessar a base local no PostgreSQL.")
+
+    @app.post("/base-local/importacoes", response_model=Tarefa, status_code=202, dependencies=[Depends(authorize)],
+              tags=["Base local"], summary="Baixa e importa um mês (ou o ano inteiro) em segundo plano")
+    async def base_local_import(pedido: PedidoImportacao, request: Request):
+        manager, error = base_local_or_error(request)
+        if error:
+            return error
+        try:
+            tarefa = manager.importar(pedido)
+        except ImportacaoEmAndamento as exc:
+            return no_store({"codigo": "IMPORTACAO_EM_ANDAMENTO", "mensagem": str(exc),
+                             "tarefa": exc.tarefa.model_dump(mode="json")}, 409)
+        return no_store(tarefa.model_dump(mode="json"), 202)
+
+    @app.get("/base-local/tarefas/{tarefa_id}", response_model=Tarefa, dependencies=[Depends(authorize)],
+             tags=["Base local"], summary="Progresso de uma importação")
+    async def base_local_task(tarefa_id: str, request: Request):
+        manager, error = base_local_or_error(request)
+        if error:
+            return error
+        tarefa = manager.tarefa(tarefa_id)
+        if not tarefa:
+            raise HTTPException(404, "Tarefa não encontrada (as tarefas ficam só na memória do processo)")
+        return no_store(tarefa.model_dump(mode="json"))
+
+    @app.post("/base-local/tarefas/{tarefa_id}/cancelar", response_model=Tarefa, dependencies=[Depends(authorize)],
+              tags=["Base local"], summary="Cancela uma importação; o mês em curso é desfeito")
+    async def base_local_cancel(tarefa_id: str, request: Request):
+        manager, error = base_local_or_error(request)
+        if error:
+            return error
+        tarefa = manager.cancelar(tarefa_id)
+        if not tarefa:
+            raise HTTPException(404, "Tarefa não encontrada")
+        return no_store(tarefa.model_dump(mode="json"))
+
+    @app.delete("/base-local/importacoes/{programa}/{arquivo_mes}", dependencies=[Depends(authorize)],
+                tags=["Base local"], summary="Remove da base local as parcelas de um programa/mês")
+    async def base_local_remove(programa: str, arquivo_mes: str, request: Request):
+        if programa not in PROGRAMAS or not valid_month(arquivo_mes):
+            raise HTTPException(422, "Programa ou mês (AAAAMM) inválido")
+        manager, error = base_local_or_error(request)
+        if error:
+            return error
+        try:
+            removed = await manager.remover(programa, arquivo_mes)
+        except ImportacaoEmAndamento:
+            return no_store({"codigo": "IMPORTACAO_EM_ANDAMENTO", "mensagem": "Esse mês está sendo importado agora."}, 409)
+        except Exception:
+            log.exception("Falha ao remover %s %s da base local", programa, arquivo_mes)
+            return history_unavailable("BASE_LOCAL_INDISPONIVEL", "Não foi possível acessar a base local no PostgreSQL.")
+        if not removed:
+            raise HTTPException(404, "Esse programa/mês não está na base local")
+        return no_store({"programa": programa, "arquivo_mes": arquivo_mes, "removido": True})
 
     if mcp_endpoint:
         # Rota exata /mcp (sem redirecionar para /mcp/), aceitando os métodos do transporte.

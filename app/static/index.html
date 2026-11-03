@@ -41,8 +41,40 @@
       </div>
     </section>
   </div>
+  <section class="card base-card" aria-labelledby="base-title">
+    <div class="section-title"><span class="step">03</span><h2 id="base-title">Base local</h2><span id="base-badge" class="badge">Dados abertos</span></div>
+    <div class="base-layout">
+      <form id="base-form">
+        <p class="hint base-intro">Baixa o arquivo mensal oficial do Portal da Transparência e importa no PostgreSQL. As consultas usam só os meses importados.</p>
+        <div class="base-grid">
+          <div><label for="base-program">Programa</label><select id="base-program" required></select></div>
+          <div><label for="base-year">Ano</label><select id="base-year" required></select></div>
+          <div><label for="base-month">Mês</label><select id="base-month"></select></div>
+          <div><label for="base-uf">UF</label><select id="base-uf"></select></div>
+        </div>
+        <p id="base-size" class="hint"></p>
+        <details class="access"><summary>Opções avançadas</summary>
+          <label for="base-limit">Limite de linhas por mês</label><input id="base-limit" type="number" min="1" step="1" placeholder="Sem limite (útil para testes)">
+          <label class="check"><input id="base-force" type="checkbox"><span>Baixar o ZIP de novo, mesmo se já existir no servidor</span></label>
+        </details>
+        <button id="base-submit" type="submit">Baixar e importar <span>↓</span></button>
+      </form>
+      <div class="base-side">
+        <div id="base-task" class="base-task" hidden>
+          <div class="task-head"><strong id="task-title"></strong><span id="task-status" class="badge"></span></div>
+          <div class="bar" role="progressbar" aria-labelledby="task-title" aria-valuemin="0" aria-valuemax="100"><span id="task-bar"></span></div>
+          <p id="task-message" role="status" aria-live="polite"></p>
+          <ul id="task-months"></ul>
+          <button id="task-cancel" type="button" class="secondary">Cancelar importação</button>
+        </div>
+        <h3>Meses importados</h3>
+        <p id="base-status" role="status" aria-live="polite">Carregando a base local…</p>
+        <ul id="base-list"></ul>
+      </div>
+    </div>
+  </section>
   <section class="card history-card" aria-labelledby="history-title">
-    <div class="section-title"><span class="step">03</span><h2 id="history-title">Consultas anteriores</h2><span class="badge">PostgreSQL</span></div>
+    <div class="section-title"><span class="step">04</span><h2 id="history-title">Consultas anteriores</h2><span class="badge">PostgreSQL</span></div>
     <form id="history-form" class="history-filter">
       <label for="history-search" class="sr-only">Filtrar histórico</label>
       <input id="history-search" type="search" placeholder="Filtrar por nome, CPF ou NIS" maxlength="160" autocomplete="off">
@@ -51,6 +83,6 @@
     <p id="history-status" role="status" aria-live="polite">Carregando o histórico…</p>
     <ul id="history-list"></ul>
   </section>
-  <footer><span>Python + Playwright · Evidências rastreáveis</span><span>JSON / PNG / OpenAPI</span></footer>
+  <footer><span>Python + PostgreSQL · Evidências rastreáveis</span><span>JSON / OpenAPI / <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP em /mcp</a></span></footer>
 </main>
 </body></html>

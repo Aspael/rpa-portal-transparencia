@@ -8,6 +8,9 @@ Exemplos:
 Os arquivos ficam em DADOS_ABERTOS_DIR e são reaproveitados; reimportar o mesmo
 programa e mês substitui as linhas anteriores. Sem --uf, um mês do Bolsa Família
 tem ~20 milhões de linhas (vários GB no banco).
+
+As mesmas funções são usadas pela API (``/base-local``) e pelas tools MCP, que
+rodam a importação em segundo plano com progresso e cancelamento.
 """
 import argparse
 import csv
@@ -17,6 +20,8 @@ import sys
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
+from typing import Callable
 
 import httpx
 import psycopg
@@ -39,6 +44,26 @@ COLUMNS = {
 }
 REQUIRED = ("mes_competencia", "nome", "valor")
 COPY_COLUMNS = ("programa", "arquivo_mes", *COLUMNS, "nome_busca")
+
+# progress(texto, percentual): o CLI imprime; a API guarda na tarefa de importação.
+Progress = Callable[[str, int | None], None]
+
+
+def print_progress(text: str, percent: int | None = None):
+    print(text, flush=True)
+
+
+class ImportacaoErro(Exception):
+    """Falha esperada (arquivo ausente, formato desconhecido); a mensagem vai para quem pediu."""
+
+
+class ImportacaoCancelada(ImportacaoErro):
+    pass
+
+
+def check_cancel(cancel: Event | None):
+    if cancel and cancel.is_set():
+        raise ImportacaoCancelada("Importação cancelada")
 
 
 def plain_url(url: str) -> str:
@@ -75,29 +100,41 @@ def parse_row(row: list[str], columns: dict[str, int]) -> dict[str, str | None] 
     return value
 
 
-def download(programa: str, mes: str, directory: Path, force: bool) -> Path:
+def download(programa: str, mes: str, directory: Path, force: bool,
+             progress: Progress = print_progress, cancel: Event | None = None) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{mes}_{programa}.zip"
     if target.exists() and not force:
-        print(f"Usando arquivo já baixado: {target}")
+        progress(f"Usando arquivo já baixado: {target.name}", 100)
         return target
     partial = target.with_suffix(".part")
     url = download_url(programa, mes)
-    print(f"Baixando {url}")
-    with httpx.stream("GET", url, follow_redirects=True, timeout=httpx.Timeout(60, read=300)) as response:
-        if response.status_code == 404:
-            raise SystemExit(f"Arquivo não encontrado no portal: {programa} {mes}. Confira o programa e o mês.")
-        response.raise_for_status()
-        if "zip" not in response.headers.get("content-type", ""):
-            raise SystemExit(f"O portal não devolveu um ZIP para {programa} {mes} (Content-Type: {response.headers.get('content-type')}).")
-        size, done, step = int(response.headers.get("content-length", 0)), 0, 0
-        with partial.open("wb") as stream:
-            for chunk in response.iter_bytes(1 << 20):
-                stream.write(chunk)
-                done += len(chunk)
-                if size and done * 10 // size > step:
-                    step = done * 10 // size
-                    print(f"  {step * 10}% ({done >> 20} MB)", flush=True)
+    progress(f"Baixando {url}", 0)
+    try:
+        with httpx.stream("GET", url, follow_redirects=True, timeout=httpx.Timeout(60, read=300)) as response:
+            if response.status_code == 404:
+                raise ImportacaoErro(f"Arquivo não encontrado no portal: {programa} {mes}. "
+                                     "Confira o programa e o mês (o portal publica com alguns meses de atraso).")
+            if response.status_code >= 400:
+                raise ImportacaoErro(f"O portal respondeu HTTP {response.status_code} para {programa} {mes}.")
+            if "zip" not in response.headers.get("content-type", ""):
+                raise ImportacaoErro(f"O portal não devolveu um ZIP para {programa} {mes} "
+                                     f"(Content-Type: {response.headers.get('content-type')}).")
+            size, done, step = int(response.headers.get("content-length", 0)), 0, 0
+            with partial.open("wb") as stream:
+                for chunk in response.iter_bytes(1 << 20):
+                    check_cancel(cancel)
+                    stream.write(chunk)
+                    done += len(chunk)
+                    if size and done * 10 // size > step:
+                        step = done * 10 // size
+                        progress(f"  {step * 10}% ({done >> 20} MB)", step * 10)
+    except httpx.HTTPError as exc:
+        partial.unlink(missing_ok=True)
+        raise ImportacaoErro(f"Falha de rede ao baixar {programa} {mes}: {exc}") from exc
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
     partial.replace(target)
     return target
 
@@ -106,34 +143,40 @@ def rows_from_zip(path: Path):
     with zipfile.ZipFile(path) as archive:
         member = next((n for n in archive.namelist() if n.lower().endswith(".csv")), None)
         if not member:
-            raise SystemExit(f"Nenhum CSV dentro de {path}")
+            raise ImportacaoErro(f"Nenhum CSV dentro de {path.name}")
         with archive.open(member) as raw:
             yield from csv.reader(io.TextIOWrapper(raw, encoding="latin-1", newline=""), delimiter=";")
 
 
-def import_file(database_url: str, programa: str, mes: str, path: Path, uf: str | None, limit: int | None) -> int:
+def import_file(database_url: str, programa: str, mes: str, path: Path, uf: str | None, limit: int | None,
+                progress: Progress = print_progress, cancel: Event | None = None) -> int:
     engine = create_engine(re.sub(r"^postgresql://", "postgresql+psycopg://", plain_url(database_url)))
     Base.metadata.create_all(engine)
     engine.dispose()
 
-    reader = rows_from_zip(path)
-    columns = column_map(next(reader))
+    try:
+        reader = rows_from_zip(path)
+        columns = column_map(next(reader))
+    except (zipfile.BadZipFile, StopIteration, ValueError) as exc:
+        raise ImportacaoErro(f"Arquivo inválido ({path.name}): {exc or 'vazio'}") from exc
     if uf and "uf" not in columns:
-        raise SystemExit("Este arquivo não tem coluna UF; rode sem --uf")
+        raise ImportacaoErro("Este arquivo não tem coluna UF; importe sem filtrar por UF")
     count = 0
     with psycopg.connect(plain_url(database_url)) as conn:
         with conn.cursor() as cur:
-            # Mesma transação: se a importação falhar, as linhas antigas continuam.
+            # Mesma transação: se a importação falhar ou for cancelada, as linhas antigas continuam.
             cur.execute("DELETE FROM pagamentos WHERE programa = %s AND arquivo_mes = %s", (programa, mes))
             with cur.copy(f"COPY pagamentos ({', '.join(COPY_COLUMNS)}) FROM STDIN") as copy:
-                for row in reader:
+                for number, row in enumerate(reader):
+                    if not number % 10_000:
+                        check_cancel(cancel)
                     value = parse_row(row, columns)
                     if not value or (uf and value["uf"] != uf):
                         continue
                     copy.write_row((programa, mes, *(value[c] for c in COLUMNS), value["nome_busca"]))
                     count += 1
                     if count % 200_000 == 0:
-                        print(f"  {count:,} linhas".replace(",", "."), flush=True)
+                        progress(f"  {count:,} linhas".replace(",", "."), None)
                     if limit and count >= limit:
                         break
             cur.execute(
@@ -146,17 +189,45 @@ def import_file(database_url: str, programa: str, mes: str, path: Path, uf: str 
     return count
 
 
-def list_imports(database_url: str):
-    with psycopg.connect(plain_url(database_url)) as conn:
+def download_and_import(settings: Settings, programa: str, mes: str, uf: str | None = None, limit: int | None = None,
+                        force: bool = False, progress: Progress = print_progress, cancel: Event | None = None) -> int:
+    """Baixa (ou reaproveita) o ZIP do mês e importa no PostgreSQL. Usado pelo CLI, pela API e pelo MCP."""
+    path = download(programa, mes, settings.dados_abertos_dir, force, progress, cancel)
+    progress(f"Importando {PROGRAMAS[programa]} {mes}{f' (UF {uf})' if uf else ''}...", None)
+    return import_file(settings.database_url.get_secret_value(), programa, mes, path, uf, limit, progress, cancel)
+
+
+def fetch_imports(database_url: str) -> list[dict]:
+    """Meses já importados, do mais recente para o mais antigo."""
+    with psycopg.connect(plain_url(database_url), connect_timeout=5) as conn:
         try:
-            rows = conn.execute("SELECT programa, arquivo_mes, coalesce(uf, 'todas'), linhas, importado_em "
-                                "FROM importacoes ORDER BY programa, arquivo_mes").fetchall()
+            rows = conn.execute("SELECT programa, arquivo_mes, uf, linhas, importado_em "
+                                "FROM importacoes ORDER BY arquivo_mes DESC, programa").fetchall()
         except psycopg.errors.UndefinedTable:
             rows = []
+    return [{"programa": p, "programa_nome": PROGRAMAS.get(p, p), "arquivo_mes": m, "uf": uf,
+             "linhas": linhas, "importado_em": quando} for p, m, uf, linhas, quando in rows]
+
+
+def remove_import(database_url: str, programa: str, mes: str) -> bool:
+    """Apaga as parcelas de um programa/mês da base local; devolve False se o mês não estava importado."""
+    with psycopg.connect(plain_url(database_url), connect_timeout=5) as conn:
+        try:
+            deleted = conn.execute("DELETE FROM importacoes WHERE programa = %s AND arquivo_mes = %s",
+                                   (programa, mes)).rowcount
+        except psycopg.errors.UndefinedTable:
+            return False
+        conn.execute("DELETE FROM pagamentos WHERE programa = %s AND arquivo_mes = %s", (programa, mes))
+    return bool(deleted)
+
+
+def list_imports(database_url: str):
+    rows = fetch_imports(database_url)
     if not rows:
         print("Nenhum arquivo importado ainda.")
-    for programa, mes, uf, linhas, quando in rows:
-        print(f"{programa:26} {mes}  UF {uf:5} {linhas:>12,} linhas  {quando:%d/%m/%Y %H:%M}".replace(",", "."))
+    for row in sorted(rows, key=lambda r: (r["programa"], r["arquivo_mes"])):
+        print(f"{row['programa']:26} {row['arquivo_mes']}  UF {row['uf'] or 'todas':5} {row['linhas']:>12,} linhas  "
+              f"{row['importado_em']:%d/%m/%Y %H:%M}".replace(",", "."))
 
 
 def main():
@@ -182,9 +253,10 @@ def main():
     if uf and not re.fullmatch(r"[A-Z]{2}", uf):
         parser.error("--uf deve ser a sigla do estado, ex.: AM")
 
-    path = download(args.programa, args.mes, settings.dados_abertos_dir, args.baixar_de_novo)
-    print(f"Importando {PROGRAMAS[args.programa]} {args.mes}{f' (UF {uf})' if uf else ''}...")
-    count = import_file(database_url, args.programa, args.mes, path, uf, args.limite)
+    try:
+        count = download_and_import(settings, args.programa, args.mes, uf, args.limite, args.baixar_de_novo)
+    except ImportacaoErro as exc:
+        raise SystemExit(str(exc)) from exc
     print(f"Concluído: {count:,} linhas importadas.".replace(",", "."))
     if not count:
         sys.exit(1)
