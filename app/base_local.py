@@ -14,8 +14,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+import psycopg
+
 from app.config import Settings
-from app.dados_abertos import PROGRAMAS
+from app.dados_abertos import PROGRAMAS, normalize_name
 from app import importar_dados
 
 log = logging.getLogger(__name__)
@@ -60,6 +62,105 @@ class PedidoImportacao(BaseModel):
         today = date.today()
         months = [self.mes] if self.mes else range(1, 13)
         return [f"{self.ano}{m:02d}" for m in months if (self.ano, m) <= (today.year, today.month)]
+
+
+class PesquisaBase(BaseModel):
+    """Filtros para navegar nas parcelas importadas (pop-up do front e tool pesquisar_base_local)."""
+    termo: str | None = Field(None, max_length=160, description="Nome (início do nome completo) ou NIS com 11 dígitos")
+    programa: str | None = Field(None, description="Restringe a um programa")
+    arquivo_mes: str | None = Field(None, description="Restringe a um mês importado (AAAAMM)")
+    uf: str | None = Field(None, description="Sigla da UF")
+    municipio: str | None = Field(None, max_length=80, description="Início do nome do município")
+    contem: bool = Field(False, description="Procura o termo em qualquer parte do nome (mais lento em bases grandes)")
+    pagina: int = Field(1, ge=1, le=1000)
+    por_pagina: int = Field(25, ge=1, le=100)
+
+    @field_validator("termo", "municipio")
+    @classmethod
+    def clean(cls, value: str | None) -> str | None:
+        value = " ".join((value or "").split())
+        return value or None
+
+    @field_validator("programa")
+    @classmethod
+    def known_program(cls, value: str | None) -> str | None:
+        if value and value not in PROGRAMAS:
+            raise ValueError(f"Programa desconhecido. Use um destes: {', '.join(PROGRAMAS)}")
+        return value or None
+
+    @field_validator("arquivo_mes")
+    @classmethod
+    def month(cls, value: str | None) -> str | None:
+        if value and not valid_month(value):
+            raise ValueError("Mês deve estar no formato AAAAMM, ex.: 202501")
+        return value or None
+
+    @field_validator("uf")
+    @classmethod
+    def state(cls, value: str | None) -> str | None:
+        value = (value or "").strip().upper() or None
+        if value and value not in UFS:
+            raise ValueError("UF inválida: use a sigla do estado, ex.: AM")
+        return value
+
+    @model_validator(mode="after")
+    def term_size(self):
+        if self.nis is not None and len(self.nis) != 11:
+            raise ValueError("NIS deve conter 11 dígitos")
+        if self.termo and self.nis is None and len(normalize_name(self.termo)) < 2:
+            raise ValueError("Digite ao menos 2 letras do nome")
+        if self.termo and self.contem and len(self.termo) < 3:
+            raise ValueError("Na busca por trecho, digite ao menos 3 letras")
+        return self
+
+    @property
+    def nis(self) -> str | None:
+        if self.termo and re.fullmatch(r"[\d.\- ]+", self.termo):
+            digits = re.sub(r"\D", "", self.termo)
+            return digits
+        return None
+
+
+def _like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def search_payments(database_url: str, pesquisa: PesquisaBase) -> dict:
+    """Parcelas da base local que batem com os filtros, ordenadas por nome; pagina com LIMIT/OFFSET."""
+    where, params = [], []
+    for column in ("programa", "arquivo_mes", "uf"):
+        if value := getattr(pesquisa, column):
+            where.append(f"{column} = %s")
+            params.append(value)
+    if pesquisa.termo:
+        if (nis := pesquisa.nis) is not None:
+            where.append("nis = %s")
+            params.append(nis)
+        else:
+            name = _like(normalize_name(pesquisa.termo))
+            where.append("nome_busca LIKE %s")
+            params.append(f"%{name}%" if pesquisa.contem else f"{name}%")
+    if pesquisa.municipio:
+        where.append("upper(municipio) LIKE %s")
+        params.append(_like(normalize_name(pesquisa.municipio)) + "%")
+    sql = ("SELECT programa, arquivo_mes, nome, nis, cpf, uf, municipio, mes_competencia, mes_referencia, valor "
+           f"FROM pagamentos {'WHERE ' + ' AND '.join(where) if where else ''} "
+           "ORDER BY nome_busca, nis, arquivo_mes DESC, mes_referencia DESC LIMIT %s OFFSET %s")
+    size = pesquisa.por_pagina
+    params += [size + 1, (pesquisa.pagina - 1) * size]
+    with psycopg.connect(importar_dados.plain_url(database_url), connect_timeout=5) as conn:
+        # Proteção: uma busca por trecho numa base enorme não segura a conexão para sempre.
+        conn.execute("SET statement_timeout = '20s'")
+        try:
+            rows = conn.execute(sql, params).fetchall()
+        except psycopg.errors.UndefinedTable:
+            rows = []
+    items = [{
+        "programa": p, "programa_nome": PROGRAMAS.get(p, p), "arquivo_mes": mes, "nome": nome, "nis": nis, "cpf": cpf,
+        "uf": uf, "municipio": municipio, "mes_competencia": competencia, "mes_referencia": referencia,
+        "valor": f"{valor:.2f}" if valor is not None else None,
+    } for p, mes, nome, nis, cpf, uf, municipio, competencia, referencia, valor in rows[:size]]
+    return {"itens": items, "pagina": pesquisa.pagina, "por_pagina": size, "tem_mais": len(rows) > size}
 
 
 class MesTarefa(BaseModel):
@@ -147,6 +248,9 @@ class BaseLocal:
             "tarefa_atual": (t := self.atual()) and t.model_dump(mode="json"),
             "tarefas": [t.model_dump(mode="json") for t in self.recentes()],
         }
+
+    async def pesquisar(self, pesquisa: PesquisaBase) -> dict:
+        return await asyncio.to_thread(search_payments, self.database_url, pesquisa)
 
     # ---- ações ----
     def importar(self, pedido: PedidoImportacao) -> Tarefa:

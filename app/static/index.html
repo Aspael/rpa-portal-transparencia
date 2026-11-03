@@ -67,7 +67,7 @@
           <ul id="task-months"></ul>
           <button id="task-cancel" type="button" class="secondary">Cancelar importação</button>
         </div>
-        <h3>Meses importados</h3>
+        <div class="base-list-head"><h3>Meses importados</h3><button id="browse-open" type="button" class="secondary">Consultar dados importados ⌕</button></div>
         <p id="base-status" role="status" aria-live="polite">Carregando a base local…</p>
         <ul id="base-list"></ul>
       </div>
@@ -83,6 +83,49 @@
     <p id="history-status" role="status" aria-live="polite">Carregando o histórico…</p>
     <ul id="history-list"></ul>
   </section>
+  <dialog id="browse" aria-labelledby="browse-title">
+    <div class="browse-head"><h2 id="browse-title">Consultar dados importados</h2><button id="browse-close" type="button" class="icon-button" aria-label="Fechar">✕</button></div>
+    <form id="browse-form">
+      <div class="browse-grid">
+        <div class="span-2"><label for="browse-base">Base importada</label><select id="browse-base"></select></div>
+        <div class="span-2"><label for="browse-term">Nome ou NIS</label><input id="browse-term" placeholder="Início do nome, ex.: MARIA DA SILVA, ou o NIS" maxlength="160" autocomplete="off"></div>
+        <div><label for="browse-uf">UF</label><select id="browse-uf"></select></div>
+        <div><label for="browse-city">Município</label><input id="browse-city" placeholder="Ex.: MANAUS" maxlength="80" autocomplete="off"></div>
+      </div>
+      <div class="browse-actions">
+        <label class="check"><input id="browse-contains" type="checkbox"><span>Contém o termo em qualquer parte do nome (mais lento)</span></label>
+        <button id="browse-submit" type="submit">Pesquisar <span>⌕</span></button>
+      </div>
+    </form>
+    <p id="browse-status" role="status" aria-live="polite">Escolha a base e pesquise por nome, NIS ou município. Sem filtros, lista as parcelas em ordem alfabética.</p>
+    <div class="browse-table" hidden>
+      <table>
+        <thead><tr><th>Nome</th><th>NIS</th><th>CPF</th><th>Município/UF</th><th>Programa · mês</th><th class="num">Valor</th><th><span class="sr-only">Ações</span></th></tr></thead>
+        <tbody id="browse-rows"></tbody>
+      </table>
+    </div>
+    <div class="browse-pager" hidden><button id="browse-prev" type="button" class="secondary">← Anterior</button><span id="browse-page"></span><button id="browse-next" type="button" class="secondary">Próxima →</button></div>
+  </dialog>
   <footer><span>Python + PostgreSQL · Evidências rastreáveis</span><span>JSON / OpenAPI / <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">MCP em /mcp</a></span></footer>
 </main>
+<button id="chat-toggle" class="chat-fab" type="button" aria-expanded="false" aria-controls="chat"><span aria-hidden="true">✦</span> Assistente</button>
+<section id="chat" class="chat" aria-labelledby="chat-title" hidden>
+  <div class="chat-head">
+    <div><h2 id="chat-title">Assistente Observa</h2><small id="chat-model">Ollama · tools MCP</small></div>
+    <button id="chat-info" type="button" class="chat-icon info" aria-expanded="false" aria-controls="chat-tools" aria-label="Ferramentas MCP disponíveis" title="Ferramentas MCP disponíveis">i</button>
+    <button id="chat-reset" type="button" class="chat-icon" aria-label="Nova conversa" title="Nova conversa (apaga a memória)">↺</button>
+    <button id="chat-close" type="button" class="chat-icon" aria-label="Fechar o assistente" title="Fechar">✕</button>
+  </div>
+  <div id="chat-tools" class="chat-tools" hidden>
+    <p class="chat-tools-intro">Ferramentas do servidor MCP em <code>/mcp</code>. As marcadas <span class="tag on">no chat</span> o assistente usa sozinho; as outras ficam com o cartão Base local e clientes MCP.</p>
+    <ul id="chat-tools-list"></ul>
+  </div>
+  <div id="chat-log" class="chat-log" role="log" aria-live="polite"></div>
+  <form id="chat-form" class="chat-form">
+    <label for="chat-input" class="sr-only">Pergunta para o assistente</label>
+    <textarea id="chat-input" rows="1" maxlength="2000" placeholder="Pergunte sobre pessoas ou o sistema…" required></textarea>
+    <button id="chat-send" type="submit" aria-label="Enviar">↑</button>
+  </form>
+  <p id="chat-foot" class="chat-foot">RAG na documentação · memória de curto prazo da conversa</p>
+</section>
 </body></html>

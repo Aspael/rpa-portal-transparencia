@@ -28,6 +28,12 @@ services:
       # Histórico das consultas no serviço postgres abaixo.
       DATABASE_URL: "postgresql://${POSTGRES_USER:-observa}:${POSTGRES_PASSWORD:-observa}@postgres:5432/${POSTGRES_DB:-observa}"
       HISTORY_CACHE_HOURS: "${HISTORY_CACHE_HOURS:-24}"
+      # Mini chat do front: Ollama rodando no computador (fora do contêiner).
+      CHAT_ENABLED: "${CHAT_ENABLED:-true}"
+      OLLAMA_HOST: "${OLLAMA_HOST:-http://host.docker.internal:11434}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen2.5:7b}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - export-state:/app/outputs
     shm_size: 1gb

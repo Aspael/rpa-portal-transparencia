@@ -18,6 +18,9 @@ RUN pip install -r requirements.txt \
 
 COPY pyproject.toml ./
 COPY app ./app
+# Documentação entra na imagem: é a base do RAG do mini chat (app/chat.py).
+COPY README.md ./
+COPY docs ./docs
 RUN pip install --no-deps . \
     && mkdir -p /app/outputs && chown robot:robot /app/outputs
 

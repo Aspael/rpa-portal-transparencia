@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     query_source: Literal["dados_abertos", "auto", "api", "site"] = "dados_abertos"
     # Servidor MCP em /mcp com a tool consultar_pessoa (mesmo X-API-Key da API).
     mcp_enabled: bool = True
+    # Mini chat do front (/chat): modelo local do Ollama + tools MCP + RAG na documentação.
+    chat_enabled: bool = True
+    ollama_host: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen2.5:7b"
+    chat_timeout_seconds: float = Field(default=180, gt=0)
+    # Memória de curto prazo: trocas lembradas por sessão e minutos sem uso até esquecer.
+    chat_memory_turns: int = Field(default=6, ge=0, le=30)
+    chat_memory_minutes: float = Field(default=30, gt=0)
     # Onde ficam os ZIPs baixados pelo importador de dados abertos.
     dados_abertos_dir: Path = Path("outputs/dados-abertos")
     # Histórico no PostgreSQL: vazio desativa a gravação das consultas.

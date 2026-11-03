@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager, nullcontext
 from secrets import compare_digest
 from pathlib import Path
+from typing import Annotated
 from uuid import UUID
 import asyncio
 import html
@@ -11,9 +12,11 @@ from fastapi.encoders import jsonable_encoder as jsonable
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
+from psycopg.errors import QueryCanceled
 from starlette.routing import Route
 
-from app.base_local import BaseLocal, ImportacaoEmAndamento, PedidoImportacao, Tarefa, valid_month
+from app.base_local import BaseLocal, ImportacaoEmAndamento, PedidoImportacao, PesquisaBase, Tarefa, valid_month
+from app.chat import Assistant, ChatError, ChatRequest
 from app.config import Settings
 from app.dados_abertos import PROGRAMAS, DadosAbertos
 from app.history import History
@@ -28,7 +31,7 @@ log = logging.getLogger(__name__)
 
 def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_factory=GoogleExporter,
                portal_api_factory=PortalApi, history_factory=History, local_factory=DadosAbertos,
-               base_local_factory=BaseLocal) -> FastAPI:
+               base_local_factory=BaseLocal, chat_transport=None) -> FastAPI:
     settings = settings or Settings()
 
     @asynccontextmanager
@@ -46,6 +49,7 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
         app.state.history = None
         app.state.dados_abertos = None
         app.state.base_local = None
+        app.state.chat = Assistant(settings, mcp, transport=chat_transport) if settings.chat_enabled else None
         try:
             if not local_mode and settings.portal_api_key and settings.portal_api_key.get_secret_value():
                 app.state.portal_api = portal_api_factory(settings)
@@ -64,6 +68,8 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
                 yield
         finally:
             try:
+                if app.state.chat:
+                    await app.state.chat.close()
                 if app.state.base_local:
                     await app.state.base_local.close()
                 if app.state.history:
@@ -77,8 +83,9 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
                     await robot.close()
 
     app = FastAPI(title="Observa — Bolsa Família (Portal da Transparência)", version="1.0.0", lifespan=lifespan)
-    mcp_endpoint = (McpEndpoint(create_mcp(lambda query: run_query(query), lambda: app.state.base_local), settings)
-                    if settings.mcp_enabled else None)
+    # O chat usa as mesmas tools no processo, mesmo com o endpoint /mcp desligado.
+    mcp = create_mcp(lambda query: run_query(query), lambda: app.state.base_local)
+    mcp_endpoint = McpEndpoint(mcp, settings) if settings.mcp_enabled else None
     static = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=static), name="static")
 
@@ -235,6 +242,21 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
             log.exception("Falha ao listar a base local")
             return history_unavailable("BASE_LOCAL_INDISPONIVEL", "Não foi possível acessar a base local no PostgreSQL.")
 
+    @app.get("/base-local/pagamentos", dependencies=[Depends(authorize)], tags=["Base local"],
+             summary="Pesquisa as parcelas importadas por nome, NIS, programa, mês, UF ou município")
+    async def base_local_search(request: Request, pesquisa: Annotated[PesquisaBase, Param()]):
+        manager, error = base_local_or_error(request)
+        if error:
+            return error
+        try:
+            return no_store(await manager.pesquisar(pesquisa))
+        except Exception as exc:
+            if isinstance(exc, QueryCanceled):
+                return no_store({"codigo": "PESQUISA_LENTA", "mensagem": "A pesquisa passou de 20 s. Escolha um mês, "
+                                 "uma UF ou desmarque “contém” para usar o índice."}, 504)
+            log.exception("Falha ao pesquisar a base local")
+            return history_unavailable("BASE_LOCAL_INDISPONIVEL", "Não foi possível acessar a base local no PostgreSQL.")
+
     @app.post("/base-local/importacoes", response_model=Tarefa, status_code=202, dependencies=[Depends(authorize)],
               tags=["Base local"], summary="Baixa e importa um mês (ou o ano inteiro) em segundo plano")
     async def base_local_import(pedido: PedidoImportacao, request: Request):
@@ -288,6 +310,41 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
         if not removed:
             raise HTTPException(404, "Esse programa/mês não está na base local")
         return no_store({"programa": programa, "arquivo_mes": arquivo_mes, "removido": True})
+
+    def chat_or_error(request: Request):
+        assistant = request.app.state.chat
+        if not assistant:
+            return None, no_store({"codigo": "CHAT_DESATIVADO", "mensagem": "Chat desativado (CHAT_ENABLED=false)."}, 503)
+        return assistant, None
+
+    @app.get("/chat/ferramentas", dependencies=[Depends(authorize)], tags=["Chat"],
+             summary="Tools do servidor MCP e quais o chat pode usar")
+    async def chat_tools(request: Request):
+        assistant, error = chat_or_error(request)
+        if error:
+            return error
+        return no_store({"modelo": settings.ollama_model, "ferramentas": await assistant.tools(),
+                         "memoria_turnos": settings.chat_memory_turns})
+
+    @app.post("/chat", dependencies=[Depends(authorize)], tags=["Chat"],
+              summary="Pergunta ao assistente (Ollama + tools MCP + RAG + memória da sessão)")
+    async def chat(pedido: ChatRequest, request: Request):
+        assistant, error = chat_or_error(request)
+        if error:
+            return error
+        try:
+            return no_store(await assistant.ask(pedido))
+        except ChatError as exc:
+            status = 504 if exc.code == "CHAT_TEMPO_ESGOTADO" else 503
+            return no_store({"codigo": exc.code, "mensagem": str(exc)}, status)
+
+    @app.delete("/chat/{sessao_id}", dependencies=[Depends(authorize)], tags=["Chat"],
+                summary="Apaga a memória de curto prazo de uma sessão")
+    async def chat_forget(sessao_id: str, request: Request):
+        assistant, error = chat_or_error(request)
+        if error:
+            return error
+        return no_store({"sessao_id": sessao_id, "esquecida": assistant.forget(sessao_id)})
 
     if mcp_endpoint:
         # Rota exata /mcp (sem redirecionar para /mcp/), aceitando os métodos do transporte.
