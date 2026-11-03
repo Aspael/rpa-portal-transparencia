@@ -70,8 +70,11 @@ $('query-form').addEventListener('submit', async event => {
   }
 });
 
+// Prioridade: campo do front; senão, a chave do .env que o servidor embute na página.
+const envApiKey = document.querySelector('meta[name="api-key"]')?.content || '';
 function authHeaders() {
-  return $('api-key').value ? {'X-API-Key': $('api-key').value} : {};
+  const key = $('api-key').value.trim() || envApiKey;
+  return key ? {'X-API-Key': key} : {};
 }
 
 async function loadHistory() {

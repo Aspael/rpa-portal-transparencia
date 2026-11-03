@@ -43,6 +43,14 @@ def test_validation_auth_and_status():
         assert client.post("/integracoes/google/arquivar", json={}, headers=headers).status_code == 422
 
 
+def test_front_uses_env_api_key_unless_disabled():
+    with TestClient(create_app(Settings(api_key="env-key"), StubRobot)) as client:
+        assert '<meta name="api-key" content="env-key">' in client.get("/").text
+    with TestClient(create_app(Settings(api_key="env-key", front_api_key_from_env=False), StubRobot)) as client:
+        page = client.get("/").text
+        assert '<meta name="api-key" content="">' in page and "env-key" not in page
+
+
 def test_deployment_cannot_start_without_required_key():
     with pytest.raises(RuntimeError, match="API_KEY"):
         with TestClient(create_app(Settings(require_api_key=True, api_key=None), StubRobot)):

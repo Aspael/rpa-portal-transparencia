@@ -3,10 +3,11 @@ from secrets import compare_digest
 from pathlib import Path
 from uuid import UUID
 import asyncio
+import html
 import logging
 
 from fastapi import Depends, FastAPI, HTTPException, Query as Param, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 
@@ -56,7 +57,13 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
 
     @app.get("/", include_in_schema=False)
     async def home():
-        return FileResponse(static / "index.html", headers={"Cache-Control": "no-store"})
+        page = (static / "index.html").read_text(encoding="utf-8")
+        key = settings.api_key.get_secret_value() if settings.api_key else ""
+        if key and settings.front_api_key_from_env:
+            # Chave do .env embutida na página; o campo do front, se preenchido, tem prioridade.
+            page = page.replace('<meta name="api-key" content="">',
+                                f'<meta name="api-key" content="{html.escape(key, quote=True)}">', 1)
+        return HTMLResponse(page, headers={"Cache-Control": "no-store"})
     api_key = APIKeyHeader(name="X-API-Key", auto_error=False)
 
     async def authorize(key: str | None = Depends(api_key)):

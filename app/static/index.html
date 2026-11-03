@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
+  <meta name="api-key" content="">
   <title>Observa · Consulta de transparência</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/app.js" defer></script>
@@ -19,7 +20,7 @@
         <input id="term" name="termo" placeholder="Digite um nome ou documento" required minlength="2" maxlength="160" autocomplete="off">
         <p class="hint">Retorna a primeira pessoa física encontrada no portal.</p>
         <label class="check"><input id="social" type="checkbox"><span>Apenas beneficiários de programa social</span></label>
-        <details class="access"><summary>Chave de acesso da API</summary><label for="api-key">X-API-Key</label><input id="api-key" type="password" placeholder="Preencha se a API exigir" autocomplete="off"><p class="hint">Usada apenas nesta página; não é salva no navegador.</p></details>
+        <details class="access"><summary>Chave de acesso da API</summary><label for="api-key">X-API-Key</label><input id="api-key" type="password" placeholder="Opcional: usa o API_KEY do .env" autocomplete="off"><p class="hint">Vazio usa a chave do .env do servidor. Preenchido, substitui essa chave só nesta página; não é salvo no navegador.</p></details>
         <button id="submit" type="submit">Consultar portal <span>↗</span></button>
       </form>
       <div class="note"><span class="dot"></span><p>Consulta à fonte oficial. Bloqueios e resultados incompletos são identificados na resposta.</p></div>
