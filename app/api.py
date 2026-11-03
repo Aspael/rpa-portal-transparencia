@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from secrets import compare_digest
 from pathlib import Path
 from uuid import UUID
@@ -10,10 +10,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query as Param, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
+from starlette.routing import Route
 
 from app.config import Settings
 from app.dados_abertos import DadosAbertos
 from app.history import History
+from app.mcp_server import McpEndpoint, create_mcp
 from app.models import ArchiveRequest, HistoryItem, Query, Result
 from app.portal_api import PortalApi
 from app.robot import Robot
@@ -50,7 +52,9 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
             if has_database:
                 app.state.history = history_factory(settings)
                 await app.state.history.start()
-            yield
+            # O transporte do MCP precisa do seu gerenciador rodando enquanto a API estiver de pé.
+            async with mcp_endpoint.session_manager.run() if mcp_endpoint else nullcontext():
+                yield
         finally:
             try:
                 if app.state.history:
@@ -63,7 +67,8 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
                 if robot:
                     await robot.close()
 
-    app = FastAPI(title="Portal da Transparência — RPA", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="Observa — Bolsa Família (Portal da Transparência)", version="1.0.0", lifespan=lifespan)
+    mcp_endpoint = McpEndpoint(create_mcp(lambda query: run_query(query)), settings) if settings.mcp_enabled else None
     static = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=static), name="static")
 
@@ -109,24 +114,8 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
     @app.post("/consultas", response_model=Result, dependencies=[Depends(authorize)],
               responses={404: {"model": Result}, 429: {"model": Result}, 502: {"model": Result}, 504: {"model": Result}},
               tags=["Consultas"])
-    async def consult(query: Query, request: Request):
-        store = request.app.state.history
-        # SELECT primeiro: termo já consultado com sucesso volta do PostgreSQL, sem ir ao portal.
-        if store and not query.atualizar:
-            try:
-                cached = await store.find(query)
-            except Exception:
-                log.exception("Não foi possível ler o histórico para o termo consultado")
-                cached = None
-            if cached:
-                return JSONResponse(cached.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
-        result = await pick_source(query, request).query(query)
-        if store and result.status == "sucesso":
-            # INSERT só de consultas com sucesso. Falha no banco não derruba a consulta.
-            try:
-                await store.save(query, result)
-            except Exception:
-                log.exception("Não foi possível gravar a consulta %s no histórico", result.consulta_id)
+    async def consult(query: Query):
+        result = await run_query(query)
         status = 200
         if result.status == "erro":
             status = {"NAO_ENCONTRADO": 404, "TEMPO_ESGOTADO": 504, "LIMITE_API_EXCEDIDO": 429,
@@ -144,13 +133,34 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
             mode = "dados_abertos" if settings.query_source == "dados_abertos" else "api_oficial"
             return Result(modo_execucao=mode, codigo=self.code, mensagem=self.message)
 
-    def pick_source(query: Query, request: Request):
+    async def run_query(query: Query) -> Result:
+        """Fluxo comum de POST /consultas e da tool MCP: histórico, fonte configurada e gravação."""
+        store = app.state.history
+        # SELECT primeiro: termo já consultado com sucesso volta do PostgreSQL, sem nova consulta.
+        if store and not query.atualizar:
+            try:
+                cached = await store.find(query)
+            except Exception:
+                log.exception("Não foi possível ler o histórico para o termo consultado")
+                cached = None
+            if cached:
+                return cached
+        result = await pick_source(query).query(query)
+        if store and result.status == "sucesso":
+            # INSERT só de consultas com sucesso. Falha no banco não derruba a consulta.
+            try:
+                await store.save(query, result)
+            except Exception:
+                log.exception("Não foi possível gravar a consulta %s no histórico", result.consulta_id)
+        return result
+
+    def pick_source(query: Query):
         if settings.query_source == "dados_abertos":
-            return request.app.state.dados_abertos or Refusal(
+            return app.state.dados_abertos or Refusal(
                 "BASE_LOCAL_DESATIVADA", "QUERY_SOURCE=dados_abertos exige DATABASE_URL (PostgreSQL com os dados importados).")
         # CPF/NIS com PORTAL_API_KEY vai pela API de Dados oficial, sem CAPTCHA.
         # A API não busca por nome: em "auto" o nome vai ao site; em "api", é recusado.
-        portal_api, robot = request.app.state.portal_api, request.app.state.robot
+        portal_api, robot = app.state.portal_api, app.state.robot
         if settings.query_source == "site":
             return robot
         if settings.query_source == "auto":
@@ -193,6 +203,9 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
             raise HTTPException(404, "Consulta não encontrada no histórico")
         return JSONResponse(result.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
 
+    if mcp_endpoint:
+        # Rota exata /mcp (sem redirecionar para /mcp/), aceitando os métodos do transporte.
+        app.router.routes.append(Route("/mcp", endpoint=mcp_endpoint, include_in_schema=False))
     return app
 
 

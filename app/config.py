@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # "auto" usa a API para CPF/NIS (com chave) e o site para nome; "api" nunca abre o site
     # (sem CAPTCHA, só CPF/NIS); "site" sempre usa o robô.
     query_source: Literal["dados_abertos", "auto", "api", "site"] = "dados_abertos"
+    # Servidor MCP em /mcp com a tool consultar_pessoa (mesmo X-API-Key da API).
+    mcp_enabled: bool = True
     # Onde ficam os ZIPs baixados pelo importador de dados abertos.
     dados_abertos_dir: Path = Path("outputs/dados-abertos")
     # Histórico no PostgreSQL: vazio desativa a gravação das consultas.
