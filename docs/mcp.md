@@ -5,9 +5,10 @@ O Observa expõe um servidor MCP em `/mcp` no mesmo processo da API (transporte 
 As tools cobrem dois usos:
 
 - **consultar** uma pessoa (`consultar_pessoa`);
+- **pesquisar** as parcelas já importadas por nome, NIS, município ou mês (`pesquisar_base_local`);
 - **gerir a base local** de dados abertos: ver o que está importado, baixar e importar um mês ou um ano inteiro, acompanhar e cancelar (`listar_base_local`, `importar_base_local`, `status_importacao`, `cancelar_importacao`).
 
-As tools de base local fazem exatamente o mesmo que as rotas `/base-local` da API e o cartão **03 · Base local** do front-end. Todas exigem `DATABASE_URL`; sem ela devolvem `BASE_LOCAL_DESATIVADA`.
+As tools de base local fazem exatamente o mesmo que as rotas `/base-local` da API e o cartão **03 · Base local** do front-end (inclusive o pop-up **Consultar dados importados**). Todas exigem `DATABASE_URL`; sem ela devolvem `BASE_LOCAL_DESATIVADA`.
 
 ## Conectar
 
@@ -73,6 +74,32 @@ Sem parâmetros. Mostra o que já está na base e o que está sendo importado.
 
 `uf: null` significa que o mês foi importado com todas as UFs. `tarefas` traz até 5 importações recentes desde que o servidor iniciou.
 
+### `pesquisar_base_local`
+
+Navega nas parcelas já importadas, uma linha por parcela. Serve para achar o nome completo ou o NIS de alguém antes de `consultar_pessoa`, ou para listar quem recebeu num município e mês. É a mesma pesquisa do pop-up **Consultar dados importados** do front.
+
+| Parâmetro | Tipo | Padrão | Descrição |
+|---|---|---|---|
+| `termo` | string \| null | `null` | início do nome (`MARIA DA`; maiúsculas e acentos são ignorados) ou NIS com 11 dígitos |
+| `programa` | string \| null | `null` | restringe a um programa |
+| `arquivo_mes` | string \| null | `null` | restringe a um mês importado (`AAAAMM`, veja `listar_base_local`) |
+| `uf` | string \| null | `null` | sigla da UF |
+| `municipio` | string \| null | `null` | início do nome do município |
+| `contem` | bool | `false` | procura o termo em qualquer parte do nome (`SILVA`); não usa índice, por isso é mais lento |
+| `pagina` | int | `1` | 25 linhas por página |
+
+Sem nenhum filtro, lista as parcelas em ordem alfabética.
+
+```json
+{"status": "sucesso", "pagina": 1, "por_pagina": 25, "tem_mais": true, "itens": [
+  {"programa": "novo-bolsa-familia", "programa_nome": "Novo Bolsa Família", "arquivo_mes": "202501",
+   "nome": "MARIA DA SILVA", "nis": "20643890445", "cpf": "***.085.106-**", "uf": "AM", "municipio": "MANAUS",
+   "mes_competencia": "202501", "mes_referencia": "202412", "valor": "650.00"}
+]}
+```
+
+`valor` vem como texto com ponto decimal (sem arredondar). A pesquisa tem limite de 20 s; se passar, devolve `PESQUISA_LENTA` (filtre por mês/UF ou desligue `contem`). Erros: `ENTRADA_INVALIDA` (NIS sem 11 dígitos, nome com menos de 2 letras, `contem` com menos de 3, mês fora de `AAAAMM`), `BASE_LOCAL_DESATIVADA`, `BASE_LOCAL_INDISPONIVEL`.
+
 ### `importar_base_local`
 
 Baixa do Portal da Transparência o arquivo mensal (ZIP com CSV) e importa no PostgreSQL, **em segundo plano**. Volta na hora com a tarefa criada.
@@ -132,7 +159,7 @@ Pede o cancelamento e devolve a tarefa. A importação para no próximo bloco (d
 
 ## Fluxo sugerido para um modelo
 
-1. `consultar_pessoa` devolveu `BASE_VAZIA` ou `NAO_ENCONTRADO` → `listar_base_local` para ver os meses cobertos.
+1. `consultar_pessoa` devolveu `BASE_VAZIA` ou `NAO_ENCONTRADO` → `listar_base_local` para ver os meses cobertos. Se o usuário só sabe parte do nome, `pesquisar_base_local` (com `contem=true` se for o sobrenome) e depois `consultar_pessoa` com o NIS encontrado.
 2. Se o usuário pedir, `importar_base_local` com programa, ano, mês e UF.
 3. `status_importacao` até `status` sair de `na_fila`/`em_andamento`.
 4. `consultar_pessoa` de novo com `atualizar=true`.
@@ -146,6 +173,7 @@ Todas com `X-API-Key`; documentadas no Swagger (`/docs`) na seção **Base local
 | Método e rota | Equivale a | Respostas |
 |---|---|---|
 | `GET /base-local` | `listar_base_local` | 200; 503 `BASE_LOCAL_DESATIVADA`/`BASE_LOCAL_INDISPONIVEL` |
+| `GET /base-local/pagamentos?termo=&programa=&arquivo_mes=&uf=&municipio=&contem=&pagina=&por_pagina=` | `pesquisar_base_local` (`por_pagina` até 100) | 200; 422 validação; 504 `PESQUISA_LENTA` |
 | `POST /base-local/importacoes` | `importar_base_local` (corpo `{programa, ano, mes?, uf?, limite?, baixar_de_novo?}`) | 202 tarefa; 409 `IMPORTACAO_EM_ANDAMENTO`; 422 validação |
 | `GET /base-local/tarefas/{tarefa_id}` | `status_importacao` | 200; 404 |
 | `POST /base-local/tarefas/{tarefa_id}/cancelar` | `cancelar_importacao` | 200; 404 |

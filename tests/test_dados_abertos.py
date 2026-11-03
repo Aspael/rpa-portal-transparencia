@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.api import create_app
 from app.config import Settings
+from app.base_local import PesquisaBase, search_payments
 from app.dados_abertos import DadosAbertos, masked_cpf, normalize_name
 from app.importar_dados import column_map, import_file, parse_row, plain_url
 from app.models import Query, Result
@@ -102,6 +103,23 @@ def test_import_and_query_against_postgres(tmp_path):
     assert import_file(DATABASE_URL, "novo-bolsa-familia", month, path, "AM", None) == 2
     # Reimportar substitui em vez de duplicar.
     assert import_file(DATABASE_URL, "novo-bolsa-familia", month, path, "AM", None) == 2
+
+    # Pesquisa do pop-up "Consultar dados importados": prefixo, trecho, NIS, município e paginação.
+    base = {"programa": "novo-bolsa-familia", "arquivo_mes": month}
+    page = search_payments(DATABASE_URL, PesquisaBase(termo=f"maria {marker[:3].lower()}", **base))
+    assert sorted(i["valor"] for i in page["itens"]) == ["600.00", "650.00"] and not page["tem_mais"]
+    fields = ("nome", "nis", "cpf", "uf", "municipio", "programa_nome")
+    assert {k: page["itens"][0][k] for k in fields} == {"nome": f"MARIA {marker}", "nis": nis, "cpf": "***.111.222-**",
+                                                       "uf": "AM", "municipio": "MANAUS", "programa_nome": "Novo Bolsa Família"}
+    assert len(search_payments(DATABASE_URL, PesquisaBase(termo=f"ia {marker.lower()}", contem=True, **base))["itens"]) == 2
+    assert search_payments(DATABASE_URL, PesquisaBase(termo=f"ia {marker.lower()}", **base))["itens"] == []
+    assert len(search_payments(DATABASE_URL, PesquisaBase(termo=nis))["itens"]) == 2
+    assert len(search_payments(DATABASE_URL, PesquisaBase(municipio="man", **base))["itens"]) == 2
+    first = search_payments(DATABASE_URL, PesquisaBase(por_pagina=1, **base))
+    second = search_payments(DATABASE_URL, PesquisaBase(por_pagina=1, pagina=2, **base))
+    assert first["tem_mais"] and not second["tem_mais"] and first["itens"] != second["itens"]
+    # Curingas do LIKE digitados pela pessoa são literais.
+    assert search_payments(DATABASE_URL, PesquisaBase(termo="%%%", contem=True, **base))["itens"] == []
 
     async def scenario():
         local = DadosAbertos(Settings(_env_file=None, database_url=DATABASE_URL))

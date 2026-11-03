@@ -186,6 +186,40 @@ def test_mcp_tools_import_and_follow_progress(fake):
         assert mcp_call(client, "cancelar_importacao", tarefa_id="nada")["codigo"] == "TAREFA_NAO_ENCONTRADA"
 
 
+def test_search_validation():
+    from app.base_local import PesquisaBase
+    assert PesquisaBase(termo=" 206.43890.44-5 ").nis == "20643890445"
+    assert PesquisaBase(termo="maria").nis is None
+    assert PesquisaBase(uf="am", municipio="  manaus ").model_dump(include={"uf", "municipio"}) == {"uf": "AM", "municipio": "manaus"}
+    for bad in ({"termo": "123"}, {"termo": "a"}, {"termo": "ab", "contem": True}, {"programa": "x"},
+                {"arquivo_mes": "2025-01"}, {"uf": "XX"}, {"por_pagina": 500}):
+        with pytest.raises(ValidationError):
+            PesquisaBase(**bad)
+
+
+def test_search_through_api_and_mcp(fake, monkeypatch):
+    seen = []
+
+    def search(url, pesquisa):
+        seen.append(pesquisa)
+        return {"itens": [{"nome": "MARIA DA SILVA", "nis": "20643890445"}], "pagina": pesquisa.pagina,
+                "por_pagina": pesquisa.por_pagina, "tem_mais": False}
+
+    monkeypatch.setattr(base_local, "search_payments", search)
+    with make_client(fake) as client:
+        assert client.get("/base-local/pagamentos").status_code == 401
+        response = client.get("/base-local/pagamentos", headers=HEADERS,
+                              params={"termo": "maria da", "programa": "bpc", "arquivo_mes": "202501", "uf": "am", "pagina": 2})
+        assert response.status_code == 200, response.text
+        assert response.json()["itens"][0]["nis"] == "20643890445"
+        assert (seen[-1].termo, seen[-1].uf, seen[-1].pagina, seen[-1].por_pagina) == ("maria da", "AM", 2, 25)
+        bad = client.get("/base-local/pagamentos", headers=HEADERS, params={"termo": "123"})
+        assert bad.status_code == 422 and "11 dígitos" in bad.text
+        found = mcp_call(client, "pesquisar_base_local", termo="MARIA", municipio="manaus")
+        assert found["status"] == "sucesso" and found["itens"][0]["nome"] == "MARIA DA SILVA"
+        assert mcp_call(client, "pesquisar_base_local", arquivo_mes="25")["codigo"] == "ENTRADA_INVALIDA"
+
+
 def test_mcp_base_tools_without_database():
     settings = Settings(_env_file=None, query_source="dados_abertos", api_key="test-key")
     with TestClient(create_app(settings, local_factory=Stub)) as client:

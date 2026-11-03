@@ -66,11 +66,14 @@ def test_lists_tool_and_requires_api_key():
                                           "clientInfo": {"name": "teste", "version": "1"}})
         assert init.status_code == 200 and init.json()["result"]["serverInfo"]["name"] == "observa"
         tools = rpc(client, "tools/list").json()["result"]["tools"]
-        assert [tool["name"] for tool in tools] == ["consultar_pessoa", "listar_base_local", "importar_base_local",
-                                                    "status_importacao", "cancelar_importacao"]
-        assert {"termo", "beneficiario_programa_social", "incluir_evidencia", "atualizar"} <= tools[0]["inputSchema"]["properties"].keys()
-        assert {"programa", "ano", "mes", "uf", "limite"} <= tools[2]["inputSchema"]["properties"].keys()
-        assert tools[2]["inputSchema"]["required"] == ["programa", "ano"]
+        by_name = {tool["name"]: tool for tool in tools}
+        assert list(by_name) == ["consultar_pessoa", "listar_base_local", "pesquisar_base_local", "importar_base_local",
+                                 "status_importacao", "cancelar_importacao"]
+        assert {"termo", "beneficiario_programa_social", "incluir_evidencia", "atualizar"} <= by_name["consultar_pessoa"]["inputSchema"]["properties"].keys()
+        assert {"programa", "ano", "mes", "uf", "limite"} <= by_name["importar_base_local"]["inputSchema"]["properties"].keys()
+        assert by_name["importar_base_local"]["inputSchema"]["required"] == ["programa", "ano"]
+        assert {"termo", "programa", "arquivo_mes", "uf", "municipio", "contem", "pagina"} <= by_name["pesquisar_base_local"]["inputSchema"]["properties"].keys()
+        assert "required" not in by_name["pesquisar_base_local"]["inputSchema"] or not by_name["pesquisar_base_local"]["inputSchema"]["required"]
         assert rpc(client, "tools/list", headers={"Accept": HEADERS["Accept"]}).status_code == 401
         assert rpc(client, "tools/list", headers={**HEADERS, "X-API-Key": "errada"}).status_code == 401
         assert "/mcp" not in client.get("/openapi.json").json()["paths"]

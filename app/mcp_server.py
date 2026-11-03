@@ -3,6 +3,7 @@
 Tools:
 - ``consultar_pessoa``: mesmo fluxo de ``POST /consultas`` (histórico no PostgreSQL
   primeiro, depois a fonte configurada em QUERY_SOURCE).
+- ``pesquisar_base_local``: navega nas parcelas importadas (nome, NIS, município, mês).
 - ``listar_base_local``, ``importar_base_local``, ``status_importacao`` e
   ``cancelar_importacao``: mesmas operações de ``/base-local`` (baixar um mês ou um
   ano dos dados abertos e importar no PostgreSQL, em segundo plano).
@@ -19,7 +20,9 @@ from pydantic import Field, ValidationError
 from starlette.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 
-from app.base_local import BaseLocal, ImportacaoEmAndamento, PedidoImportacao
+from psycopg.errors import QueryCanceled
+
+from app.base_local import BaseLocal, ImportacaoEmAndamento, PedidoImportacao, PesquisaBase
 from app.config import Settings
 from app.dados_abertos import PROGRAMAS
 from app.models import Query, Result
@@ -31,7 +34,8 @@ INSTRUCTIONS = (
     "e informe quando status for 'erro', citando a mensagem. "
     "A consulta usa a base local: se ela devolver BASE_VAZIA ou não achar a pessoa, veja os meses com "
     "listar_base_local e, se o usuário pedir, importe um mês com importar_base_local (de preferência com UF) "
-    "e acompanhe com status_importacao até terminar."
+    "e acompanhe com status_importacao até terminar. Para achar o nome completo ou o NIS de alguém, ou listar "
+    "beneficiários de um município, use pesquisar_base_local."
 )
 
 PROGRAMAS_DESC = ", ".join(f"{k} ({v})" for k, v in PROGRAMAS.items())
@@ -96,6 +100,41 @@ def create_mcp(run_query: Callable[[Query], Awaitable[Result]],
                     "mensagem": "Não foi possível acessar a base local no PostgreSQL."}
         summary["tarefas"] = summary["tarefas"][:5]
         return {"status": "sucesso", **jsonable_encoder(summary)}
+
+    @mcp.tool(
+        name="pesquisar_base_local",
+        description=(
+            "Pesquisa as parcelas já importadas na base local, uma linha por parcela (nome, NIS, CPF mascarado, "
+            "município/UF, mês e valor). Útil para achar o nome completo ou o NIS antes de consultar_pessoa, ou para "
+            "listar quem recebeu num município/mês. Paginado: veja tem_mais e peça a próxima pagina."
+        ),
+    )
+    async def pesquisar_base_local(
+        termo: Annotated[str | None, Field(description="Início do nome (ex.: 'MARIA DA') ou NIS com 11 dígitos")] = None,
+        programa: Annotated[str | None, Field(description=f"Programa: {PROGRAMAS_DESC}")] = None,
+        arquivo_mes: Annotated[str | None, Field(description="Mês importado, AAAAMM (veja listar_base_local)")] = None,
+        uf: Annotated[str | None, Field(description="Sigla da UF")] = None,
+        municipio: Annotated[str | None, Field(description="Início do nome do município")] = None,
+        contem: Annotated[bool, Field(description="Termo em qualquer parte do nome (mais lento)")] = False,
+        pagina: Annotated[int, Field(description="Página, a partir de 1")] = 1,
+    ) -> dict[str, Any]:
+        manager, error = manager_or_error()
+        if error:
+            return error
+        try:
+            pesquisa = PesquisaBase(termo=termo, programa=programa, arquivo_mes=arquivo_mes, uf=uf,
+                                    municipio=municipio, contem=contem, pagina=pagina, por_pagina=25)
+        except ValidationError as exc:
+            return {"status": "erro", "codigo": "ENTRADA_INVALIDA", "mensagem": _invalid(exc)}
+        try:
+            found = await manager.pesquisar(pesquisa)
+        except QueryCanceled:
+            return {"status": "erro", "codigo": "PESQUISA_LENTA",
+                    "mensagem": "A pesquisa passou de 20 s; filtre por mês, UF ou use contem=false."}
+        except Exception:
+            return {"status": "erro", "codigo": "BASE_LOCAL_INDISPONIVEL",
+                    "mensagem": "Não foi possível acessar a base local no PostgreSQL."}
+        return {"status": "sucesso", **found}
 
     @mcp.tool(
         name="importar_base_local",

@@ -56,11 +56,11 @@ The default needs no key and never hits a CAPTCHA: the files are downloaded and 
 | Evidence | Link to the official file of each month; PNG screenshot in Base64 when the robot is used |
 | API | FastAPI with OpenAPI/Swagger, `X-API-Key` authentication and HTTPS |
 | MCP | MCP server at `/mcp` (Streamable HTTP) with tools to query a person and to download/import the local base by year/month, in the same process as the API ([docs/mcp.md](docs/mcp.md)) |
-| Local model | Ollama as a local LLM, connected through MCP |
+| Local model | Ollama as a local LLM, connected through MCP; mini chat in the front end with RAG and short-term memory ([docs/chat.md](docs/chat.md)) |
 | Hyperautomation | n8n with the official Google Drive and Google Sheets nodes |
 | Deployment | Docker on a VPS, served over HTTPS on a neutral domain |
 | History | PostgreSQL via SQLAlchemy (ORM): stores successful queries and reuses them on the next search; pgAdmin to inspect |
-| Tests | 69 automated tests (including PostgreSQL integration) and structural validation of the n8n workflow |
+| Tests | 85 automated tests (including PostgreSQL integration) and structural validation of the n8n workflow |
 
 Application links:
 
@@ -98,7 +98,7 @@ The MCP server runs in the same process as the API and calls the same data sourc
 
 By default (`QUERY_SOURCE=dados_abertos`) Observa **does not access the government website or API when answering a query**. It searches a local base in PostgreSQL built from the monthly open-data files of the Portal da Transparência ([download-de-dados](https://portaldatransparencia.gov.br/download-de-dados)). There is no CAPTCHA, no key and no rate limit; Playwright is not even started in this mode.
 
-Import one month of a program before querying. The easiest way is the **03 · Base local** card in the front end: pick the program, the year, a month (or "Ano inteiro" for the whole year) and a state, then click **Baixar e importar**. The import runs in the background with a progress bar and can be cancelled; the card also lists the imported months and removes them. The same actions are available through the API (`/base-local`, see Swagger) and through MCP tools ([docs/mcp.md](docs/mcp.md)).
+Import one month of a program before querying. The easiest way is the **03 · Base local** card in the front end: pick the program, the year, a month (or "Ano inteiro" for the whole year) and a state, then click **Baixar e importar**. The import runs in the background with a progress bar and can be cancelled; the card also lists the imported months and removes them. **Consultar dados importados** (or **Ver dados** on a month) opens a pop-up to pick an imported base and search it by name, NIS, state or municipality; **Ver panorama** on a row runs the full query for that person. The same actions are available through the API (`/base-local`, see Swagger) and through MCP tools ([docs/mcp.md](docs/mcp.md)).
 
 From the command line (inside Docker, `DATABASE_URL` is already set):
 
@@ -208,6 +208,7 @@ With the API running, the MCP server is available at `http://127.0.0.1:8000/mcp`
 |---|---|---|
 | `consultar_pessoa` | `termo`, `beneficiario_programa_social` (default `false`), `incluir_evidencia` (default `false`), `atualizar` (default `false`) | Queries the person and returns the same JSON as the [result contract](#result-contract) |
 | `listar_base_local` | — | Programs, months already imported (program, `AAAAMM`, state, rows) and the running import |
+| `pesquisar_base_local` | `termo` (name prefix or NIS), `programa`, `arquivo_mes`, `uf`, `municipio`, `contem`, `pagina` | Browses the imported installments, 25 per page: name, NIS, masked CPF, municipality, month, amount |
 | `importar_base_local` | `programa`, `ano`, `mes` (omit for the whole year), `uf`, `limite` | Downloads the monthly open-data file(s) and imports them in the background; returns a task |
 | `status_importacao` | `tarefa_id` (optional) | Progress of an import: status, current month, download percentage, result per month |
 | `cancelar_importacao` | `tarefa_id` | Cancels an import; the month in progress is rolled back |
@@ -229,6 +230,10 @@ claude mcp add --transport http portal-transparencia \
   http://127.0.0.1:8000/mcp \
   --header "X-API-Key: YOUR_KEY"
 ```
+
+### Mini chat in the front end
+
+The **✦ Assistente** button (bottom right) opens a chat. A local Ollama model answers using the MCP tools above (called in-process), retrieves passages from the documentation with BM25 (RAG over `app/conhecimento/`, `docs/` and this README) and remembers the last `CHAT_MEMORY_TURNS` exchanges of the conversation. The **i** button lists every MCP tool, with its parameters and whether the chat uses it; importing and cancelling stay with the Base local card and MCP clients. Each answer shows the tools it called and the documentation sources it used. API: `GET /chat/ferramentas`, `POST /chat`, `DELETE /chat/{sessao_id}`. Details, configuration and hardware notes: [docs/chat.md](docs/chat.md).
 
 ### Local model with Ollama
 
@@ -528,7 +533,9 @@ The suite covers input and authentication, search by name/document, social filte
 
 The Node script validates connections, scripts, JSON file generation, the presence of the official Drive/Sheets nodes, the mapping of the seven columns and the absence of credentials in the versioned artifact.
 
-`tests/test_base_local.py` covers importing by year/month through the API and the MCP tools with a fake downloader: request validation, background task with progress, whole-year imports with failed months, one import at a time, cancellation and removal.
+`tests/test_chat.py` covers the front-end chat with a simulated Ollama: RAG retrieval, tool calls in-process, short-term memory, refusal of tools outside the chat and Ollama errors.
+
+`tests/test_base_local.py` covers importing by year/month through the API and the MCP tools with a fake downloader: request validation, background task with progress, search of the imported data, whole-year imports with failed months, one import at a time, cancellation and removal.
 
 The MCP tests (`tests/test_mcp.py`) verify that all tools are listed, that a call without `X-API-Key` is rejected, that evidence is only returned when requested and that `status` is preserved. The robot is mocked, with no access to the portal and no dependency on Ollama.
 
@@ -551,8 +558,12 @@ The MCP tests (`tests/test_mcp.py`) verify that all tools are listed, that a cal
 | `ASSISTED_MODE` | `false` | on a CAPTCHA, repeats the query in a visible window for a person to solve the verification (needs a screen) |
 | `ASSISTED_WAIT_SECONDS` | `180` | how long the assisted mode waits for the verification to be completed |
 | `MCP_ENABLED` | `true` | enables the `/mcp` endpoint |
-| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama address, used by `scripts/chat_ollama.py` |
-| `OLLAMA_MODEL` | `qwen2.5:7b` | local model, used by `scripts/chat_ollama.py` |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama address, used by the front-end chat (`/chat`) and `scripts/chat_ollama.py`; in `compose.yaml` it defaults to `http://host.docker.internal:11434` |
+| `OLLAMA_MODEL` | `qwen2.5:7b` | local model with tool calling, used by `/chat` and `scripts/chat_ollama.py` |
+| `CHAT_ENABLED` | `true` | enables the front-end chat routes `/chat` |
+| `CHAT_TIMEOUT_SECONDS` | `180` | deadline for each call to the model |
+| `CHAT_MEMORY_TURNS` | `6` | exchanges remembered per chat session (`0` disables the memory) |
+| `CHAT_MEMORY_MINUTES` | `30` | idle minutes before a chat session is forgotten |
 | `MCP_URL` | `http://127.0.0.1:8000/mcp` | MCP server address, used by `scripts/chat_ollama.py` |
 | `MCP_API_KEY` | empty | key sent in `X-API-Key` to `/mcp`, used by `scripts/chat_ollama.py` |
 
@@ -567,6 +578,8 @@ app/
   importar_dados.py   downloads and imports the monthly open-data files (CLI)
   base_local.py       background imports by year/month for the API, front end and MCP
   mcp_server.py       MCP server at /mcp and its tools
+  chat.py             front-end chat: Ollama + MCP tools + RAG + short-term memory
+  conhecimento/       knowledge base (Markdown) for the chat's RAG
   history.py          query history in PostgreSQL
   portal_api.py       official Data API client (CPF/NIS)
   robot.py            browser lifecycle and navigation
@@ -576,7 +589,7 @@ app/
 tests/                unit and Chromium integration tests
 workflows/            importable n8n workflow
 scripts/              diagnostics, workflow validation and chat_ollama.py
-docs/                 MCP tools (mcp.md), bonus architecture, deployment and technical report
+docs/                 MCP tools (mcp.md), chat (chat.md), bonus architecture, deployment and technical report
 ```
 
 Query data, screenshots, tokens and local variables are ignored by Git through `.gitignore`. The application does not log the content of responses.**

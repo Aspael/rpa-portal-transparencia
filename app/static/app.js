@@ -189,6 +189,8 @@ const MONTH_STATUS = {pendente: 'Na fila', baixando: 'Baixando', importando: 'Im
 const ACTIVE = ['na_fila', 'em_andamento'];
 let baseTask = null;
 let basePoll = null;
+let baseImports = [];
+let browsePage = 1;
 
 function option(value, label) {
   const item = document.createElement('option'); item.value = value; item.textContent = label; return item;
@@ -248,6 +250,8 @@ async function loadBase() {
 }
 
 function renderImports(items) {
+  baseImports = items;
+  $('browse-open').disabled = items.length === 0;
   $('base-badge').textContent = `${items.length} mês(es)`;
   $('base-status').hidden = items.length > 0;
   $('base-status').textContent = 'Nenhum mês importado ainda. Escolha programa, ano e mês e clique em “Baixar e importar”.';
@@ -259,7 +263,10 @@ function renderImports(items) {
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'link-button';
     remove.textContent = 'Remover'; remove.setAttribute('aria-label', `Remover ${name.textContent}`);
     remove.addEventListener('click', () => removeImport(item, remove));
-    row.append(name, details, remove);
+    const browse = document.createElement('button'); browse.type = 'button'; browse.className = 'link-button browse-link';
+    browse.textContent = 'Ver dados'; browse.setAttribute('aria-label', `Ver dados de ${name.textContent}`);
+    browse.addEventListener('click', () => openBrowse(item));
+    row.append(name, details, browse, remove);
     return row;
   }));
 }
@@ -348,6 +355,257 @@ async function removeImport(item, button) {
   }
 }
 
+// ---- Pop-up: consultar dados importados ----
+function brl(value) {
+  return value == null ? '' : Number(value).toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
+}
+
+function openBrowse(item = null) {
+  $('browse-base').replaceChildren(option('', 'Todas as bases importadas'), ...baseImports.map(base =>
+    option(`${base.programa}|${base.arquivo_mes}`, `${base.programa_nome} · ${formatMonth(base.arquivo_mes)} · ${base.uf || 'todas as UFs'}`)));
+  if (item) $('browse-base').value = `${item.programa}|${item.arquivo_mes}`;
+  if (!$('browse-uf').options.length) $('browse-uf').replaceChildren(option('', 'Todas'), ...UFS.map(uf => option(uf, uf)));
+  if (!$('browse').open) $('browse').showModal();
+  $('browse-term').focus();
+  browsePage = 1;
+  // Já abre listando: com uma base escolhida, o usuário vê o conteúdo sem digitar nada.
+  if (item) searchBrowse();
+}
+
+async function searchBrowse() {
+  const [programa, mes] = $('browse-base').value.split('|');
+  const params = new URLSearchParams({pagina: browsePage, por_pagina: 25});
+  if (programa) { params.set('programa', programa); params.set('arquivo_mes', mes); }
+  for (const [key, id] of [['termo', 'browse-term'], ['uf', 'browse-uf'], ['municipio', 'browse-city']]) {
+    if ($(id).value.trim()) params.set(key, $(id).value.trim());
+  }
+  if ($('browse-contains').checked) params.set('contem', 'true');
+  $('browse-submit').disabled = true;
+  $('browse-status').hidden = false; $('browse-status').textContent = 'Pesquisando na base local…';
+  try {
+    const response = await fetch(`/base-local/pagamentos?${params}`, {headers: authHeaders()});
+    if (!response.ok) throw new Error(response.status === 401 ? 'Informe a chave em “Chave de acesso da API”.' : await readError(response, 'Não foi possível pesquisar.'));
+    renderBrowse(await response.json());
+  } catch (error) {
+    $('browse-status').textContent = error.message === 'Failed to fetch' ? 'Não foi possível pesquisar na base local.' : error.message;
+    document.querySelector('.browse-table').hidden = true; document.querySelector('.browse-pager').hidden = true;
+  } finally {
+    $('browse-submit').disabled = false;
+  }
+}
+
+function renderBrowse(data) {
+  const empty = data.itens.length === 0;
+  $('browse-status').hidden = !empty;
+  $('browse-status').textContent = data.pagina > 1 ? 'Não há mais resultados.' : 'Nenhuma parcela encontrada com esses filtros. Confira o nome completo ou tente “contém”.';
+  document.querySelector('.browse-table').hidden = empty;
+  $('browse-rows').replaceChildren(...data.itens.map(item => {
+    const row = document.createElement('tr');
+    const cells = [item.nome, item.nis || '—', item.cpf || '—', [item.municipio, item.uf].filter(Boolean).join('/') || '—',
+      `${PROGRAMS[item.programa]?.replace(/ \(.*\)$/, '') || item.programa_nome} · ${formatMonth(item.arquivo_mes)}${item.mes_referencia && item.mes_referencia !== item.arquivo_mes ? ` (ref. ${formatMonth(item.mes_referencia)})` : ''}`,
+      brl(item.valor)];
+    cells.forEach((text, index) => {
+      const cell = document.createElement('td'); cell.textContent = text;
+      cell.dataset.label = ['Nome', 'NIS', 'CPF', 'Local', 'Mês', 'Valor'][index];
+      if (index === 5) cell.className = 'num';
+      row.append(cell);
+    });
+    const action = document.createElement('td');
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'secondary small';
+    open.textContent = 'Ver panorama'; open.setAttribute('aria-label', `Ver panorama de ${item.nome}`);
+    open.addEventListener('click', () => {
+      $('browse').close();
+      $('term').value = item.nis || item.nome;
+      $('query-form').requestSubmit();
+      $('result-title').scrollIntoView({behavior: 'smooth', block: 'start'});
+    });
+    action.append(open); row.append(action);
+    return row;
+  }));
+  document.querySelector('.browse-pager').hidden = data.pagina === 1 && !data.tem_mais;
+  $('browse-prev').disabled = data.pagina === 1; $('browse-next').disabled = !data.tem_mais;
+  $('browse-page').textContent = `Página ${data.pagina}`;
+}
+
+$('browse-open').addEventListener('click', () => openBrowse());
+$('browse-close').addEventListener('click', () => $('browse').close());
+$('browse').addEventListener('click', event => { if (event.target === $('browse')) $('browse').close(); });
+$('browse-form').addEventListener('submit', event => { event.preventDefault(); browsePage = 1; searchBrowse(); });
+$('browse-prev').addEventListener('click', () => { browsePage = Math.max(1, browsePage - 1); searchBrowse(); });
+$('browse-next').addEventListener('click', () => { browsePage += 1; searchBrowse(); });
+
 fillBaseForm();
 loadBase();
 $('api-key').addEventListener('change', loadBase);
+
+// ---- Mini chat: Ollama + tools MCP + RAG + memória de curto prazo (guardada no servidor) ----
+const CHAT_SUGGESTIONS = ['Quais meses estão importados?', 'Por que o CPF aparece com asteriscos?', 'Procure pessoas com sobrenome SILVA em Manaus'];
+let chatSession = null;
+let chatBusy = false;
+let chatToolsLoaded = false;
+
+function storedSession() {
+  try { return sessionStorage.getItem('observa-chat') || null; } catch { return null; }
+}
+function storeSession(id) {
+  try { id ? sessionStorage.setItem('observa-chat', id) : sessionStorage.removeItem('observa-chat'); } catch { /* sem storage: memória só nesta aba */ }
+}
+
+// Texto do modelo sem HTML: só **negrito**, quebras de linha e citações [n].
+function richText(text, sources) {
+  const fragment = document.createDocumentFragment();
+  for (const part of text.split(/(\*\*[^*]+\*\*|\[\d\])/g)) {
+    if (!part) continue;
+    const bold = part.match(/^\*\*([^*]+)\*\*$/);
+    const cite = part.match(/^\[(\d)\]$/);
+    if (bold) {
+      const strong = document.createElement('strong'); strong.textContent = bold[1]; fragment.append(strong);
+    } else if (cite && sources.some(source => source.n === Number(cite[1]))) {
+      const mark = document.createElement('sup'); mark.className = 'cite'; mark.textContent = cite[1];
+      mark.title = sources.find(source => source.n === Number(cite[1])).titulo; fragment.append(mark);
+    } else {
+      fragment.append(document.createTextNode(part));
+    }
+  }
+  return fragment;
+}
+
+function chatMessage(role, text, extra = {}) {
+  const item = document.createElement('div'); item.className = `chat-msg ${role}`;
+  const bubble = document.createElement('div'); bubble.className = 'bubble';
+  bubble.append(role === 'assistant' ? richText(text, extra.fontes || []) : document.createTextNode(text));
+  item.append(bubble);
+  if (extra.ferramentas?.length) {
+    const tools = document.createElement('ul'); tools.className = 'chat-used';
+    for (const tool of extra.ferramentas) {
+      const row = document.createElement('li'); row.className = tool.status;
+      const args = Object.entries(tool.argumentos || {}).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(', ');
+      row.textContent = `↳ ${tool.nome}(${args})${tool.status === 'erro' ? ' · erro' : ''}`;
+      tools.append(row);
+    }
+    item.append(tools);
+  }
+  if (extra.fontes?.length) {
+    const sources = document.createElement('details'); sources.className = 'chat-sources';
+    const summary = document.createElement('summary'); summary.textContent = `Fontes da documentação (${extra.fontes.length})`;
+    const list = document.createElement('ol');
+    for (const source of extra.fontes) {
+      const row = document.createElement('li'); row.value = source.n;
+      row.textContent = `${source.titulo} — ${source.arquivo}`;
+      if (source.citada) row.className = 'cited';
+      list.append(row);
+    }
+    sources.append(summary, list); item.append(sources);
+  }
+  $('chat-log').append(item);
+  $('chat-log').scrollTop = $('chat-log').scrollHeight;
+  return item;
+}
+
+function chatWelcome() {
+  $('chat-log').replaceChildren();
+  chatMessage('assistant', 'Olá! Posso consultar pessoas na base local, pesquisar os dados importados e explicar como o Observa funciona. Clique em “i” para ver as ferramentas MCP que eu uso.');
+  const chips = document.createElement('div'); chips.className = 'chat-chips';
+  for (const text of CHAT_SUGGESTIONS) {
+    const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'chip'; chip.textContent = text;
+    chip.addEventListener('click', () => { $('chat-input').value = text; $('chat-form').requestSubmit(); });
+    chips.append(chip);
+  }
+  $('chat-log').append(chips);
+}
+
+function openChat(open) {
+  $('chat').hidden = !open;
+  $('chat-toggle').setAttribute('aria-expanded', String(open));
+  $('chat-toggle').hidden = open;
+  if (open) {
+    if (!$('chat-log').childElementCount) chatWelcome();
+    loadChatTools();
+    $('chat-input').focus();
+  } else {
+    $('chat-toggle').focus();
+  }
+}
+
+async function loadChatTools() {
+  if (chatToolsLoaded) return;
+  try {
+    const response = await fetch('/chat/ferramentas', {headers: authHeaders()});
+    if (!response.ok) throw new Error(await readError(response, 'Não foi possível listar as ferramentas.'));
+    const data = await response.json();
+    chatToolsLoaded = true;
+    $('chat-model').textContent = `Ollama · ${data.modelo} · ${data.ferramentas.filter(tool => tool.no_chat).length} tools no chat`;
+    $('chat-foot').textContent = `RAG na documentação · memória das últimas ${data.memoria_turnos} trocas`;
+    $('chat-tools-list').replaceChildren(...data.ferramentas.map(tool => {
+      const row = document.createElement('li');
+      const head = document.createElement('div'); head.className = 'tool-head';
+      const name = document.createElement('code'); name.textContent = tool.nome;
+      const tag = document.createElement('span'); tag.className = `tag ${tool.no_chat ? 'on' : ''}`;
+      tag.textContent = tool.no_chat ? 'no chat' : 'só MCP / front';
+      head.append(name, tag);
+      const description = document.createElement('p'); description.textContent = tool.descricao;
+      row.append(head, description);
+      if (tool.parametros.length) {
+        const params = document.createElement('p'); params.className = 'tool-params';
+        params.textContent = 'Parâmetros: ' + tool.parametros.map(param => `${param.nome}${param.obrigatorio ? '*' : ''} (${param.tipo})`).join(', ');
+        row.append(params);
+      }
+      return row;
+    }));
+  } catch (error) {
+    $('chat-tools-list').replaceChildren();
+    const row = document.createElement('li'); row.textContent = error.message === 'Failed to fetch' ? 'Não foi possível listar as ferramentas.' : error.message;
+    $('chat-tools-list').append(row);
+  }
+}
+
+$('chat-toggle').addEventListener('click', () => openChat(true));
+$('chat-close').addEventListener('click', () => openChat(false));
+$('chat').addEventListener('keydown', event => { if (event.key === 'Escape') openChat(false); });
+$('chat-info').addEventListener('click', () => {
+  const show = $('chat-tools').hidden;
+  $('chat-tools').hidden = !show;
+  $('chat-info').setAttribute('aria-expanded', String(show));
+  $('chat-info').classList.toggle('active', show);
+  if (show) loadChatTools();
+});
+$('chat-reset').addEventListener('click', async () => {
+  const id = chatSession;
+  chatSession = null; storeSession(null);
+  chatWelcome();
+  if (id) fetch(`/chat/${encodeURIComponent(id)}`, {method: 'DELETE', headers: authHeaders()}).catch(() => {});
+});
+$('chat-input').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('chat-form').requestSubmit(); }
+});
+$('chat-input').addEventListener('input', () => {
+  $('chat-input').style.height = 'auto';
+  $('chat-input').style.height = `${Math.min($('chat-input').scrollHeight, 120)}px`;
+});
+
+$('chat-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const text = $('chat-input').value.trim();
+  if (!text || chatBusy) return;
+  chatBusy = true; $('chat-send').disabled = true;
+  document.querySelector('.chat-chips')?.remove();
+  chatMessage('user', text);
+  $('chat-input').value = ''; $('chat-input').style.height = 'auto';
+  const thinking = chatMessage('assistant pending', 'Pensando…');
+  try {
+    const response = await fetch('/chat', {method: 'POST', headers: {'Content-Type': 'application/json', ...authHeaders()},
+      body: JSON.stringify({mensagem: text, ...(chatSession ? {sessao_id: chatSession} : {})})});
+    if (!response.ok) throw new Error(response.status === 401 ? 'Informe a chave em “Chave de acesso da API”.' : await readError(response, 'O assistente não respondeu.'));
+    const data = await response.json();
+    chatSession = data.sessao_id; storeSession(chatSession);
+    thinking.remove();
+    chatMessage('assistant', data.resposta, data);
+  } catch (error) {
+    thinking.remove();
+    chatMessage('assistant error', error.message === 'Failed to fetch' ? 'Não foi possível falar com o servidor.' : error.message);
+  } finally {
+    chatBusy = false; $('chat-send').disabled = false; $('chat-input').focus();
+  }
+});
+
+chatSession = storedSession();
