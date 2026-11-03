@@ -368,7 +368,7 @@ When the verification appears, the robot does not try to bypass it. It ends the 
 
 ### Official alternative: Data API
 
-With `PORTAL_API_KEY` filled in (a free key from the gov.br registration at [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados)), queries by **CPF/NIS** use the official Data API instead of the website, with no CAPTCHA. The result comes out with `modo_execucao=api_oficial`: the person is retrieved from `/pessoa-fisica` and each benefit indicated there is paginated at the program's endpoint. There is no screenshot, because there is no browser. Search by **name** still goes through the website, since the API doesn't offer it.
+With `PORTAL_API_KEY` filled in (a free key from the gov.br registration at [portaldatransparencia.gov.br/api-de-dados](https://portaldatransparencia.gov.br/api-de-dados)), queries by **CPF/NIS** use the official Data API instead of the website, with no CAPTCHA. The result comes out with `modo_execucao=api_oficial`: the person is retrieved from `/pessoa-fisica` and each benefit indicated there is paginated at the program's endpoint. There is no screenshot, because there is no browser. Search by **name** still goes through the website, since the API doesn't offer it. To never open the website (and never hit the CAPTCHA), set `QUERY_SOURCE=api`: CPF/NIS go to the Data API, and a name search or an empty `PORTAL_API_KEY` returns a clear error (`BUSCA_POR_NOME_SEM_API`, HTTP 422, or `CHAVE_PORTAL_AUSENTE`, HTTP 503) instead of launching the robot.
 
 The project limits calls to `PORTAL_API_MAX_RPM` per minute. When the API responds with HTTP 429, it waits and retries twice; if the limit persists, it returns `codigo=LIMITE_API_EXCEDIDO` with HTTP 429. A rejected key produces `CHAVE_PORTAL_INVALIDA`.
 
@@ -465,6 +465,7 @@ The MCP tests (`tests/test_mcp.py`) verify that the `consultar_pessoa` tool is l
 | `REQUIRE_API_KEY` | `false` | prevents starting without a key when enabled |
 | `PORTAL_API_KEY` | empty | gov.br Data API key; with it, CPF/NIS queries use the official API instead of the website |
 | `PORTAL_API_MAX_RPM` | `80` | cap on requests per minute to the Data API (official limit: 90/min by day, 300/min overnight) |
+| `QUERY_SOURCE` | `auto` | `auto`: CPF/NIS via Data API when the key exists, name via website; `api`: never opens the website (CPF/NIS only); `site`: always the robot |
 | `MCP_ENABLED` | `true` | enables the `/mcp` endpoint |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | Ollama address, used by `scripts/chat_ollama.py` |
 | `OLLAMA_MODEL` | `qwen2.5:7b` | local model, used by `scripts/chat_ollama.py` |

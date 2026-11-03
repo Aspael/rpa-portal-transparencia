@@ -105,11 +105,7 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
                 cached = None
             if cached:
                 return JSONResponse(cached.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
-        # CPF/NIS com PORTAL_API_KEY vai pela API de Dados oficial, sem CAPTCHA;
-        # busca por nome continua no site, que a API não oferece.
-        portal_api = request.app.state.portal_api
-        source = portal_api if portal_api and query.is_document else request.app.state.robot
-        result = await source.query(query)
+        result = await pick_source(query, request).query(query)
         if store and result.status == "sucesso":
             # INSERT só de consultas com sucesso. Falha no banco não derruba a consulta.
             try:
@@ -118,8 +114,33 @@ def create_app(settings: Settings | None = None, robot_factory=Robot, exporter_f
                 log.exception("Não foi possível gravar a consulta %s no histórico", result.consulta_id)
         status = 200
         if result.status == "erro":
-            status = {"NAO_ENCONTRADO": 404, "TEMPO_ESGOTADO": 504, "LIMITE_API_EXCEDIDO": 429}.get(result.codigo, 502)
+            status = {"NAO_ENCONTRADO": 404, "TEMPO_ESGOTADO": 504, "LIMITE_API_EXCEDIDO": 429,
+                      "BUSCA_POR_NOME_SEM_API": 422, "CHAVE_PORTAL_AUSENTE": 503}.get(result.codigo, 502)
         return JSONResponse(result.model_dump(mode="json"), status_code=status, headers={"Cache-Control": "no-store"})
+
+    class Refusal:
+        """Fonte que só devolve um erro: usada quando QUERY_SOURCE=api não pode atender sem abrir o site."""
+        def __init__(self, code: str, message: str):
+            self.code, self.message = code, message
+
+        async def query(self, query: Query) -> Result:
+            return Result(modo_execucao="api_oficial", codigo=self.code, mensagem=self.message)
+
+    def pick_source(query: Query, request: Request):
+        # CPF/NIS com PORTAL_API_KEY vai pela API de Dados oficial, sem CAPTCHA.
+        # A API não busca por nome: em "auto" o nome vai ao site; em "api", é recusado.
+        portal_api, robot = request.app.state.portal_api, request.app.state.robot
+        if settings.query_source == "site":
+            return robot
+        if settings.query_source == "auto":
+            return portal_api if portal_api and query.is_document else robot
+        if not query.is_document:
+            return Refusal("BUSCA_POR_NOME_SEM_API", "A API oficial do governo só consulta por CPF ou NIS. "
+                           "Informe o documento ou use QUERY_SOURCE=auto para buscar nomes pelo site.")
+        if not portal_api:
+            return Refusal("CHAVE_PORTAL_AUSENTE", "QUERY_SOURCE=api exige PORTAL_API_KEY no .env "
+                           "(cadastro gratuito em portaldatransparencia.gov.br/api-de-dados).")
+        return portal_api
 
     def history_unavailable(code: str, message: str):
         return JSONResponse({"codigo": code, "mensagem": message}, status_code=503, headers={"Cache-Control": "no-store"})
